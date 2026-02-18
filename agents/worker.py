@@ -372,7 +372,7 @@ class Worker:
                     tool = self.tools_map.get(func_name)
                     
                     if tool:
-                        result = await tool.execute(**func_args)
+                        result = await tool.validate_and_execute(**func_args)
                     else:
                         result = f"❌ Error: Tool '{func_name}' not found."
                     

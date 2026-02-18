@@ -30,8 +30,10 @@ from openai import AsyncOpenAI
 
 from agents.router import Router
 from agents.worker import Worker
+from state import AgenticState
 from utils.history_manager import HistoryManager, DEFAULT_HISTORY_DIR
 from utils.mcp_client import global_mcp_manager
+from utils.semantic_cache import SemanticCache
 
 # ── 환경 설정 ─────────────────────────────────────────────────
 load_dotenv()
@@ -134,27 +136,49 @@ async def process_request(
     router: Router,
     worker: Worker,
     history: HistoryManager,
+    state: AgenticState,
+    cache: SemanticCache | None = None,
 ) -> str:
-    """사용자 요청 처리 파이프라인"""
+    """사용자 요청 처리 파이프라인 (AgenticState 기반)"""
     history.add_message("user", user_input)
+    state.increment_turn()
 
-    # ── 1단계: Router가 라우팅 결정 ──────────────────────────
+    # ── 0단계: Semantic Cache Lookup (Short-Circuit) ──────
+    if cache:
+        cached = cache.get(user_input)
+        if cached is not None:
+            history.add_message(
+                "assistant", cached,
+                metadata={"handler": "semantic-cache", "cache_hit": True},
+            )
+            return cached
+
+    # ── 1단계: Sticky Routing 또는 Router 호출 ───────────────
     logger.info("=" * 60)
-    logger.info("🧭 [Router] 작업 분석 중...")
-    routing = await router.route(user_input)
-    destination = routing["destination"]
-    reason = routing["reason"]
+
+    if state.current_agent is not None:
+        # Sticky Routing: 이전 턴의 에이전트를 유지
+        destination = state.current_agent
+        reason = "Sticky Routing (이전 턴과 동일 에이전트)"
+        logger.info(f"🧭 [Sticky Route] Router 스킵 → {destination} | {reason}")
+    else:
+        # 새 라우팅 결정 필요
+        logger.info("🧭 [Router] 작업 분석 중...")
+        routing = await router.route(user_input)
+        destination = routing["destination"]
+        reason = routing["reason"]
+        state.current_agent = destination
+        logger.info(f"🧭 [Router] 결정: {destination} | 사유: {reason}")
 
     history.add_message(
         "system",
         f"[ROUTING] {destination}: {reason}",
-        metadata={"type": "routing", "detail": routing},
+        metadata={"type": "routing", "sticky": state.current_agent is not None},
     )
-
-    logger.info(f"🧭 [Router] 결정: {destination} | 사유: {reason}")
 
     # ── 2단계: 라우팅에 따라 실행 ────────────────────────────
     context = history.get_context()
+    state.conversation_history = context
 
     if destination == "CLOUD":
         logger.info(f"☁️  [Cloud PM: {CLOUD_MODEL_NAME}] 고난도 작업 처리 중...")
@@ -196,6 +220,9 @@ async def process_request(
 
             logger.info(f"🚨 [Worker → Cloud PM] 에스컬레이션 발생! (사유: {esc_reason})")
             logger.info(f"☁️  [Cloud PM: {CLOUD_MODEL_NAME}] 난제 처리 중...")
+
+            # Sticky Routing 해제: 에스컬레이션 시 에이전트 전환
+            state.reset_routing()
             
             escalation_context = (
                 f"이전 Worker의 분석:\n{result['response']}\n\n"
@@ -228,6 +255,11 @@ async def process_request(
             )
 
     logger.info("=" * 60)
+
+    # 성공적인 응답을 캐시에 저장
+    if cache and not final_response.startswith("[ERROR]"):
+        cache.put(user_input, final_response)
+
     return final_response
 
 
@@ -291,6 +323,12 @@ async def main() -> None:
         context_window=CONTEXT_WINDOW,
     )
 
+    # AgenticState 초기화
+    state = AgenticState()
+
+    # Semantic Cache 초기화
+    cache = SemanticCache()
+
     logger.info("✅ 시스템 초기화 완료")
     logger.info(f"📡 LiteLLM Proxy: {LITELLM_BASE_URL}")
 
@@ -320,6 +358,7 @@ async def main() -> None:
 
                 elif cmd == "/clear":
                     history.clear()
+                    state = AgenticState()  # 상태도 함께 초기화
                     continue
 
                 elif cmd == "/stats":
@@ -358,6 +397,7 @@ async def main() -> None:
                         print("⚠️ 사용법: /new <project_name>")
                         continue
                     history = switch_project(args[0])
+                    state = AgenticState()  # 프로젝트 전환 시 상태 초기화
                     continue
 
                 elif cmd == "/load":
@@ -365,6 +405,7 @@ async def main() -> None:
                         print("⚠️ 사용법: /load <project_name>")
                         continue
                     history = switch_project(args[0])
+                    state = AgenticState()  # 프로젝트 전환 시 상태 초기화
                     continue
 
                 elif cmd == "/model":
@@ -389,7 +430,7 @@ async def main() -> None:
                     continue
 
             # ── 일반 처리 ────────────────────────────────────────
-            response = await process_request(user_input, router, worker, history)
+            response = await process_request(user_input, router, worker, history, state, cache)
             
             if not response.startswith("[ERROR]"):
                 last_msgs = history.get_full_history()[-1:]

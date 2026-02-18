@@ -230,6 +230,72 @@ class HistoryManager:
         except Exception as e:
             logger.error(f"❌ 마이그레이션 실패: {e}")
 
+    # ── Semantic Context Filtering ─────────────────────────────────
+
+    def get_summarized_context(self, max_recent: int = 3) -> dict:
+        """핸드오프용 요약 컨텍스트를 반환합니다.
+
+        전체 대화 로그 대신 핵심 정보만 추려서 반환함으로써
+        컨텍스트 오염을 방지하고 토큰을 절약합니다.
+
+        Args:
+            max_recent: 최근 메시지 포함 개수
+
+        Returns:
+            dict: {
+                "summary": str,        # 대화 핵심 요약
+                "entities": dict,      # 추출된 핵심 데이터
+                "recent_messages": list # 최근 N턴 메시지
+            }
+        """
+        full = self.get_full_history()
+
+        # 최근 메시지 추출
+        recent = full[-max_recent:] if full else []
+        recent_msgs = [{"role": m["role"], "content": m["content"]} for m in recent]
+
+        # 핵심 정보 추출: routing 및 handler 메타데이터에서 엔티티 수집
+        entities: dict[str, str] = {}
+        key_points: list[str] = []
+
+        for msg in full:
+            meta = msg.get("metadata") or {}
+
+            # 라우팅 결정 기록
+            if meta.get("type") == "routing":
+                key_points.append(f"[Routing] {msg['content']}")
+
+            # 핸들러 정보
+            handler = meta.get("handler", "")
+            if handler:
+                entities["last_handler"] = handler
+
+            # 에스컬레이션 사유
+            esc_reason = meta.get("reason", "")
+            if esc_reason and meta.get("handler"):
+                entities["escalation_reason"] = esc_reason
+
+        # 사용자 메시지에서 첫 요청과 마지막 요청 요약
+        user_msgs = [m for m in full if m["role"] == "user"]
+        if user_msgs:
+            entities["first_request"] = user_msgs[0]["content"][:200]
+            if len(user_msgs) > 1:
+                entities["latest_request"] = user_msgs[-1]["content"][:200]
+
+        # 요약 문자열 생성
+        summary_parts = []
+        if entities.get("first_request"):
+            summary_parts.append(f"초기 요청: {entities['first_request'][:100]}")
+        if key_points:
+            summary_parts.append(f"라우팅 이력: {len(key_points)}건")
+        summary_parts.append(f"총 {len(full)}턴 대화 진행")
+
+        return {
+            "summary": " | ".join(summary_parts),
+            "entities": entities,
+            "recent_messages": recent_msgs,
+        }
+
     # ── Metadata Methods ──────────────────────────────────────────
 
     def set_metadata(self, **kwargs) -> None:
