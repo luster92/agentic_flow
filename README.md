@@ -19,6 +19,14 @@
 *   **Tool Safety**: Pydantic 기반 도구 입력 검증으로 런타임 에러 대신 에이전트 피드백 제공.
 *   **Observability**: 토큰 사용량, 추정 비용, 캐시 히트율, Sticky 라우팅율 등 종합 메트릭 추적.
 
+### 🏢 Enterprise Edition (v2)
+
+*   **🎭 Dynamic Persona System**: 6개 전문 페르소나(Worker, Architect, Coder, Devil's Advocate, Moderator, Security Auditor)를 YAML 기반으로 정의하고 런타임에 핫스왑합니다.
+*   **⚔️ Adversarial Verification**: 변증법적 정-반-합(Thesis-Antithesis-Synthesis) 토론 루프를 통해 단일 에이전트의 환각과 편향을 극복합니다.
+*   **💾 Persistent Checkpointing**: SQLite 기반 체크포인트로 에이전트 상태를 영속적으로 저장하고 임의 시점으로 롤백할 수 있습니다.
+*   **⏸️ Human-in-the-Loop (HITL)**: 인터럽트 기반 제어 메커니즘으로 민감한 작업 전 인간 승인을 요구하고, 상태를 수정한 뒤 재개할 수 있습니다.
+*   **⚙️ Hierarchical Config**: 계층적 YAML 설정 + Jinja2 템플릿으로 런타임 변수 주입을 지원합니다.
+
 ## 🏗️ Architecture
 
 ```
@@ -39,12 +47,19 @@ User Input
 │     Router       │──── LOCAL ──→ Worker ──→ Validator ──→ Critic
 │  (DeepSeek-R1)   │                                          │
 └────────┬────────┘                              REJECT ──→ Cloud PM
-         │ CLOUD
-         ▼
-┌─────────────────┐
-│    Cloud PM      │
-│ (Gemini/Claude)  │
-└─────────────────┘
+         │ CLOUD                                               │
+         ▼                                                     ▼
+┌─────────────────┐                              ┌─────────────────────┐
+│    Cloud PM      │──────────────────────────────│  ⚔️ DebateLoop       │
+│ (Gemini/Claude)  │                              │ Devil → Moderator   │
+└─────────────────┘                              │ → Worker (수정)     │
+                                                  └─────────┬───────────┘
+                                                            │ ESCALATE
+                                                            ▼
+                                                  ┌─────────────────────┐
+                                                  │ ⏸️ HITL Manager      │
+                                                  │ /approve · /reject  │
+                                                  └─────────────────────┘
 ```
 
 ## 🛠 Prerequisites
@@ -96,6 +111,16 @@ User Input
 *   `local-worker`: 메인 작업 담당 (Default: Qwen 2.5 Coder)
 *   `cloud-pm`: 에스컬레이션 담당 (Gemini, Claude, GPT 선택 가능)
 
+Enterprise 설정은 `configs/base.yaml`에서 관리됩니다:
+```yaml
+system:
+  default_persona: "worker"
+  checkpoint_enabled: true
+  debate_enabled: true
+  debate_max_rounds: 3
+  hitl_enabled: true
+```
+
 ## ▶️ Usage
 
 이 시스템은 **LiteLLM Proxy**와 **Main Agent**가 동시에 실행되어야 합니다.
@@ -114,45 +139,100 @@ python main.py
 ```
 
 ### 3. Commands
-에이전트 실행 후 다음 명령어를 사용할 수 있습니다.
-*   `/new <project>`: 새 프로젝트 세션 생성
-*   `/load <project>`: 기존 프로젝트 로드
-*   `/model <name>`: Cloud PM 모델 변경 (예: `/model claude`)
-*   `/list`, `/current`: 프로젝트 목록 및 현재 상태 확인
-*   `/stats`: 성능 메트릭 및 토큰 비용 요약
-*   `/clear`: 대화 기록 및 상태 초기화
+
+#### 기본 명령어
+| 명령어 | 설명 |
+|---|---|
+| `/new <project>` | 새 프로젝트 세션 생성 |
+| `/load <project>` | 기존 프로젝트 로드 |
+| `/model <name>` | Cloud PM 모델 변경 (gemini / claude / gpt4) |
+| `/list` | 프로젝트 목록 확인 |
+| `/current` | 현재 상태 확인 |
+| `/stats` | 성능 메트릭 및 토큰 비용 |
+| `/clear` | 대화 기록 초기화 |
+| `/exit` | 종료 |
+
+#### Enterprise 명령어
+| 명령어 | 설명 |
+|---|---|
+| `/persona <id>` | 페르소나 전환 (worker / architect / coder / devil / moderator / security_auditor) |
+| `/checkpoint [label]` | 수동 마일스톤 체크포인트 저장 |
+| `/rollback [step]` | 특정 단계로 롤백 (인자 없으면 목록 표시) |
+| `/debate` | 마지막 응답에 적대적 검증(Devil's Advocate) 실행 |
+| `/approve` | HITL 승인 (에이전트 재개) |
+| `/reject` | HITL 거절 |
+
+### 4. Persona Examples
+
+```bash
+# Devil's Advocate로 전환하여 비판적 분석
+/persona devil
+이 아키텍처에 보안 취약점이 있을까?
+
+# Security Auditor로 전환하여 레드팀 분석
+/persona security_auditor
+main.py의 보안 감사를 수행해줘
+
+# Worker로 복귀
+/persona worker
+```
 
 ## 📂 Project Structure
 
 ```
 agentic_flow/
-├── agents/
-│   ├── router.py           # Rule-based + LLM 라우팅
-│   ├── worker.py           # ReAct 도구 사용 루프 + Critic/Helper 위임
-│   ├── critic.py           # JSON 기반 코드 리뷰
-│   └── helper.py           # 경량 작업 위임
-├── utils/
-│   ├── history_manager.py  # SQLite 대화 기록 + Semantic Context Filter
-│   ├── memory.py           # ChromaDB 벡터 메모리
-│   ├── semantic_cache.py   # 시맨틱 응답 캐시 (ChromaDB)
-│   ├── tools.py            # Pydantic 검증 도구 프레임워크
-│   ├── metrics.py          # 토큰/비용/캐시 추적 메트릭
-│   ├── mcp_client.py       # MCP 프로토콜 어댑터
-│   ├── validator.py        # AST + Sandbox 코드 검증
-│   ├── rate_limiter.py     # 슬라이딩 윈도우 속도 제한
-│   └── introspector.py     # 런타임 라이브러리 체크
-├── state.py                # AgenticState 구조화 상태 객체
+├── core/                       # 코어 인프라 계층
+│   ├── state.py                #   Pydantic v2 AgentState (직렬화/체크포인팅)
+│   ├── checkpoint.py           #   SQLite 체크포인트 저장/롤백
+│   └── config_loader.py        #   계층적 YAML 설정 + Jinja2
+├── engine/                     # 엔진 계층
+│   ├── persona.py              #   PersonaManager (핫스왑 + 전환 로깅)
+│   ├── adversarial.py          #   DebateLoop (정-반-합 토론 루프)
+│   └── hitl.py                 #   HITL 인터럽트 핸들러
+├── agents/                     # 에이전트 계층
+│   ├── router.py               #   Rule-based + LLM 라우팅
+│   ├── worker.py               #   ReAct 도구 사용 루프 + Critic/Helper 위임
+│   ├── critic.py               #   JSON 기반 코드 리뷰
+│   └── helper.py               #   경량 작업 위임
+├── utils/                      # 유틸리티
+│   ├── history_manager.py      #   SQLite 대화 기록 + Context Filter
+│   ├── memory.py               #   ChromaDB 벡터 메모리
+│   ├── semantic_cache.py       #   시맨틱 응답 캐시
+│   ├── tools.py                #   Pydantic 검증 도구 프레임워크
+│   ├── metrics.py              #   토큰/비용/캐시 추적
+│   ├── mcp_client.py           #   MCP 프로토콜 어댑터
+│   ├── validator.py            #   AST + Sandbox 코드 검증
+│   ├── rate_limiter.py         #   슬라이딩 윈도우 속도 제한
+│   └── introspector.py         #   런타임 라이브러리 체크
+├── configs/                    # 설정 파일
+│   ├── base.yaml               #   전역 기본 설정
+│   └── personas/               #   페르소나 YAML 정의
+│       ├── worker.yaml
+│       ├── architect.yaml
+│       ├── coder.yaml
+│       ├── devil.yaml
+│       ├── moderator.yaml
+│       └── security_auditor.yaml
 ├── tests/
-│   └── test_improvements.py
-├── config.yaml             # 모델 및 시스템 설정
-├── main.py                 # 메인 오케스트레이터
-└── requirements.txt        # 의존성 패키지 목록
+│   ├── test_improvements.py    #   기본 기능 테스트 (17 tests)
+│   └── test_enterprise.py      #   Enterprise 기능 테스트 (32 tests)
+├── state.py                    # 하위 호환 alias → core.state
+├── config.yaml                 # LiteLLM 프록시 설정
+├── main.py                     # 메인 오케스트레이터
+└── requirements.txt            # 의존성 패키지
 ```
 
 ## 🧪 Testing
 
 ```bash
+# 전체 테스트 (49 tests)
 python3 -m pytest tests/ -v
+
+# Enterprise 테스트만
+python3 -m pytest tests/test_enterprise.py -v
+
+# 기존 기능 테스트만
+python3 -m pytest tests/test_improvements.py -v
 ```
 
 ## 📄 License
