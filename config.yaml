@@ -1,0 +1,68 @@
+# ============================================================
+# LiteLLM Proxy Configuration
+# Mac Mini M4 Hybrid AI Orchestration System
+# ============================================================
+# 모든 모델은 localhost:4000 (LiteLLM Proxy)를 통해 통신합니다.
+# 실행: litellm --config config.yaml --port 4000
+# ============================================================
+
+model_list:
+  # ── Router (Brain) ──────────────────────────────────────────
+  # DeepSeek-R1-Distill-Llama-8B: <think> 태그 기반 논리적 라우팅
+  - model_name: local-router
+    litellm_params:
+      model: ollama/deepseek-r1:8b
+      api_base: "http://localhost:11434"
+
+  # ── Worker (Main) ───────────────────────────────────────────
+  # Qwen 2.5 Coder 32B (Int4): 핵심 코드 구현, 모듈 개발
+  # 약 20GB VRAM 점유, Helper 호출 권한 보유
+  - model_name: local-worker
+    litellm_params:
+      model: ollama/qwen2.5-coder:32b
+      api_base: "http://localhost:11434"
+
+  # ── Helper (Tool) ───────────────────────────────────────────
+  # Phi-4 Mini (3.8B): 단순 포맷팅, 주석, 번역
+  # [Strict Subordinate] 독자적 사고 금지, 에스컬레이션 불가
+  - model_name: local-helper
+    litellm_params:
+      model: ollama/phi4-mini:latest
+      api_base: "http://localhost:11434"
+
+  # ── Cloud PM ────────────────────────────────────────────────
+  # Gemini 3 Pro: 고난도 기획, 복잡한 추론 (Default)
+  - model_name: cloud-pm-gemini
+    litellm_params:
+      model: gemini/gemini-3-pro
+      api_key: "os.environ/GEMINI_API_KEY"
+
+  # Claude 4.6 Sonnet: 코딩 및 추론 특화 (2026-02)
+  - model_name: cloud-pm-claude
+    litellm_params:
+      model: anthropic/claude-4-6-sonnet
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+  # GPT-5.3-Codex: 최신 코딩 특화 모델 (2026-02)
+  - model_name: cloud-pm-gpt4
+    litellm_params:
+      model: openai/gpt-5.3-codex
+      api_key: "os.environ/OPENAI_API_KEY"
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 120
+
+# ── MCP Servers ────────────────────────────────────────────────
+# Model Context Protocol 서버 설정
+# command: 실행할 명령어 (예: npx, python)
+# args: 명령어 인자 리스트
+# env: 추가 환경 변수 (Example_KEY: value)
+mcp_servers:
+  # filesystem:
+  #   command: "npx"
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/splendor/antigravity"]
+  
+  demo_server:
+    command: "python"
+    args: ["utils/demo_mcp_server.py"]
