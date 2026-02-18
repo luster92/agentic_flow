@@ -1,0 +1,31 @@
+# ============================================================
+# AgenticFlow Enterprise — 전역 기본 설정
+# ============================================================
+
+system:
+  # 기본 페르소나
+  default_persona: "worker"
+
+  # 체크포인팅
+  checkpoint_enabled: true
+  checkpoint_on_tool_call: true     # 외부 도구 호출 시 자동 체크포인트
+
+  # 적대적 검증 (Devil's Advocate)
+  debate_enabled: true
+  debate_max_rounds: 3
+  debate_approval_threshold: 7     # 0~10 점수, 이 값 미만이면 승인
+  debate_auto_trigger_on_cloud: false  # CLOUD 라우팅 시 자동 토론 활성화
+
+  # Human-in-the-loop
+  hitl_enabled: true
+  hitl_confidence_threshold: 0.6   # 이 값 미만이면 HITL 트리거
+
+models:
+  router: "local-router"
+  worker: "local-worker"
+  helper: "local-helper"
+  cloud_default: "cloud-pm-gemini"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s │ %(levelname)-7s │ %(name)-20s │ %(message)s"
