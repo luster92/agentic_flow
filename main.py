@@ -49,6 +49,7 @@ from agents.worker import Worker
 from core.state import AgentState, SessionStatus, CheckpointType
 from core.checkpoint import CheckpointManager
 from core.config_loader import ConfigLoader
+from core.event_bus import EventBus, Event, EventType
 from engine.persona import PersonaManager
 from engine.adversarial import DebateLoop
 from engine.hitl import HITLManager, WaitApproval
@@ -165,6 +166,7 @@ async def process_request(
     debate_loop: DebateLoop | None = None,
     hitl_mgr: HITLManager | None = None,
     enterprise_config: dict | None = None,
+    event_bus: EventBus | None = None,
 ) -> str:
     """사용자 요청 처리 파이프라인 (Enterprise Edition)"""
     ecfg = enterprise_config or {}
@@ -190,12 +192,24 @@ async def process_request(
         reason = "Sticky Routing (이전 턴과 동일 에이전트)"
         logger.info(f"🧭 [Sticky Route] Router 스킵 → {destination} | {reason}")
     else:
-        logger.info("🧭 [Router] 작업 분석 중...")
+        logger.info(f"🧭 [Router] 작업 분석 중...")
         routing = await router.route(user_input)
         destination = routing["destination"]
         reason = routing["reason"]
         state.current_agent = destination
         logger.info(f"🧭 [Router] 결정: {destination} | 사유: {reason}")
+
+        # 이벤트 버스에 라우팅 결정 발행
+        if event_bus:
+            await event_bus.publish(Event(
+                type=EventType.DECISION,
+                source="router",
+                payload={
+                    "destination": destination,
+                    "reason": reason,
+                    "thinking": routing.get("thinking", ""),
+                },
+            ))
 
     history.add_message(
         "system",
@@ -326,6 +340,18 @@ async def process_request(
     if cache and not final_response.startswith("[ERROR]"):
         cache.put(user_input, final_response)
 
+    # 이벤트 버스에 응답 발행
+    if event_bus:
+        await event_bus.publish(Event(
+            type=EventType.AGENT_RESPONSE,
+            source="orchestrator",
+            payload={
+                "response": final_response[:500],
+                "destination": destination,
+                "turn": state.turn_number,
+            },
+        ))
+
     return final_response
 
 
@@ -410,11 +436,27 @@ async def main() -> None:
     )
     hitl_mgr = HITLManager(checkpoint_manager=checkpoint_mgr)
 
+    # 이벤트 버스 초기화
+    event_bus = EventBus()
+    await event_bus.start()
+
+    # 세션 시작 이벤트 발행
+    await event_bus.publish(Event(
+        type=EventType.SESSION_START,
+        source="system",
+        payload={
+            "session_id": state.session_id,
+            "persona": persona_mgr.current_id,
+            "proxy_url": LITELLM_BASE_URL,
+        },
+    ))
+
     # 마지막 응답 추적 (적대적 검증용)
     last_response: str = ""
 
     logger.info("✅ 시스템 초기화 완료 (Enterprise Edition)")
     logger.info(f"📡 LiteLLM Proxy: {LITELLM_BASE_URL}")
+    logger.info(f"📡 EventBus: running ({event_bus.subscription_count} subscribers)")
     logger.info(f"🎭 Active Persona: {persona_mgr.current_id}")
 
     # ── 인터랙티브 루프 ──────────────────────────────────────
@@ -639,6 +681,7 @@ async def main() -> None:
                     debate_loop=debate_loop,
                     hitl_mgr=hitl_mgr,
                     enterprise_config=enterprise_config,
+                    event_bus=event_bus,
                 )
                 last_response = response
 
@@ -665,6 +708,19 @@ async def main() -> None:
     except KeyboardInterrupt:
         print("\n👋 종료합니다.")
     finally:
+        # 세션 종료 이벤트 발행
+        try:
+            await event_bus.publish(Event(
+                type=EventType.SESSION_END,
+                source="system",
+                payload={"session_id": state.session_id},
+            ))
+        except Exception:
+            pass
+
+        # EventBus 종료
+        await event_bus.stop()
+
         # MCP 연결 종료
         await global_mcp_manager.cleanup()
 

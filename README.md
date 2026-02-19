@@ -27,6 +27,15 @@
 *   **⏸️ Human-in-the-Loop (HITL)**: 인터럽트 기반 제어 메커니즘으로 민감한 작업 전 인간 승인을 요구하고, 상태를 수정한 뒤 재개할 수 있습니다.
 *   **⚙️ Hierarchical Config**: 계층적 YAML 설정 + Jinja2 템플릿으로 런타임 변수 주입을 지원합니다.
 
+### 🌐 OpenClaw Integration (v3)
+
+*   **📡 Event-Driven Architecture**: `asyncio.Queue` 기반 비동기 이벤트 버스. 12가지 이벤트 타입(USER_MESSAGE, AGENT_RESPONSE, TOOL_CALL 등)의 pub/sub 패턴으로 컴포넌트 간 느슨한 결합을 구현합니다.
+*   **🛡️ Sandboxed Tool Execution**: 경로 화이트리스트, 명령어 블랙리스트, 심볼릭 링크 탐지로 도구 실행 보안을 강화합니다. 모든 파일 접근이 `SandboxManager`를 통해 검증됩니다.
+*   **📊 Model Tiering & Cost Tracking**: 작업 복잡도를 SIMPLE/STANDARD/COMPLEX로 분류하고 최적 모델을 자동 선택합니다. 세션별 토큰 비용을 실시간 추적합니다.
+*   **📈 Structured Observability**: thought/tool_call/decision/error/metric 5가지 이벤트 타입을 JSONL 파일로 기록합니다. 외부 UI에서 에이전트 내부 상태를 시각화할 수 있습니다.
+*   **📜 SOUL/MEMORY Integration**: OpenClaw의 `SOUL.md`에서 에이전트 성격/말투/원칙을 파싱하여 시스템 프롬프트에 주입합니다. `MEMORY.md`로 장기 기억을 관리하고 키워드 검색을 지원합니다.
+*   **🔌 Gateway Approval Bridge**: HITL 승인 채널을 추상화하여 CLI, WebSocket, HTTP 등 다양한 승인 경로를 지원합니다. 타임아웃 기반 자동 거절 기능을 포함합니다.
+
 ## 🏗️ Architecture
 
 ```
@@ -184,28 +193,36 @@ agentic_flow/
 ├── core/                       # 코어 인프라 계층
 │   ├── state.py                #   Pydantic v2 AgentState (직렬화/체크포인팅)
 │   ├── checkpoint.py           #   SQLite 체크포인트 저장/롤백
-│   └── config_loader.py        #   계층적 YAML 설정 + Jinja2
+│   ├── config_loader.py        #   계층적 YAML 설정 + Jinja2
+│   ├── event_bus.py            #   🆕 비동기 EventBus (pub/sub, 12 이벤트 타입)
+│   ├── sandbox.py              #   🆕 보안 샌드박스 (경로/명령어 검증)
+│   └── model_router.py         #   🆕 작업 티어 분류 + 비용 추적
 ├── engine/                     # 엔진 계층
 │   ├── persona.py              #   PersonaManager (핫스왑 + 전환 로깅)
 │   ├── adversarial.py          #   DebateLoop (정-반-합 토론 루프)
-│   └── hitl.py                 #   HITL 인터럽트 핸들러
+│   ├── hitl.py                 #   HITL 인터럽트 핸들러
+│   ├── soul.py                 #   🆕 SOUL.md 파서 → 시스템 프롬프트 주입
+│   └── memory_file.py          #   🆕 MEMORY.md 읽기/쓰기/검색
 ├── agents/                     # 에이전트 계층
 │   ├── router.py               #   Rule-based + LLM 라우팅
 │   ├── worker.py               #   ReAct 도구 사용 루프 + Critic/Helper 위임
 │   ├── critic.py               #   JSON 기반 코드 리뷰
 │   └── helper.py               #   경량 작업 위임
+├── gateway/                    # 🆕 외부 연동 계층
+│   └── approval_bridge.py      #   승인 채널 추상화 (CLI/Callback)
 ├── utils/                      # 유틸리티
 │   ├── history_manager.py      #   SQLite 대화 기록 + Context Filter
 │   ├── memory.py               #   ChromaDB 벡터 메모리
 │   ├── semantic_cache.py       #   시맨틱 응답 캐시
-│   ├── tools.py                #   Pydantic 검증 도구 프레임워크
+│   ├── tools.py                #   Pydantic 검증 도구 + Sandbox 연동
 │   ├── metrics.py              #   토큰/비용/캐시 추적
 │   ├── mcp_client.py           #   MCP 프로토콜 어댑터
 │   ├── validator.py            #   AST + Sandbox 코드 검증
 │   ├── rate_limiter.py         #   슬라이딩 윈도우 속도 제한
+│   ├── structured_logger.py    #   🆕 구조화 이벤트 (JSONL 출력)
 │   └── introspector.py         #   런타임 라이브러리 체크
 ├── configs/                    # 설정 파일
-│   ├── base.yaml               #   전역 기본 설정
+│   ├── base.yaml               #   전역 설정 (system/security/tiering/openclaw)
 │   └── personas/               #   페르소나 YAML 정의
 │       ├── worker.yaml
 │       ├── architect.yaml
@@ -215,23 +232,27 @@ agentic_flow/
 │       └── security_auditor.yaml
 ├── tests/
 │   ├── test_improvements.py    #   기본 기능 테스트 (17 tests)
-│   └── test_enterprise.py      #   Enterprise 기능 테스트 (32 tests)
+│   ├── test_enterprise.py      #   Enterprise 기능 테스트 (32 tests)
+│   └── test_openclaw_integration.py  #  🆕 OpenClaw 통합 테스트 (44 tests)
 ├── state.py                    # 하위 호환 alias → core.state
 ├── config.yaml                 # LiteLLM 프록시 설정
-├── main.py                     # 메인 오케스트레이터
+├── main.py                     # 메인 오케스트레이터 (EventBus 연동)
 └── requirements.txt            # 의존성 패키지
 ```
 
 ## 🧪 Testing
 
 ```bash
-# 전체 테스트 (49 tests)
+# 전체 테스트 (93 tests)
 python3 -m pytest tests/ -v
 
-# Enterprise 테스트만
+# OpenClaw 통합 테스트 (44 tests)
+python3 -m pytest tests/test_openclaw_integration.py -v
+
+# Enterprise 테스트만 (32 tests)
 python3 -m pytest tests/test_enterprise.py -v
 
-# 기존 기능 테스트만
+# 기존 기능 테스트만 (17 tests)
 python3 -m pytest tests/test_improvements.py -v
 ```
 

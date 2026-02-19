@@ -5,8 +5,8 @@ Worker 에이전트가 외부 세계(파일시스템, 쉘 등)와 상호작용�
 OpenAI Function Calling 규격(JSON Schema)을 준수합니다.
 
 Security:
-- 모든 도구는 실행 전 경로 유효성 및 권한을 검증해야 합니다. (Path Traversal 방지)
-- Sandbox 내에서 실행되는 것을 권장합니다.
+- 모든 도구는 SandboxManager를 통해 경로 유효성 및 권한을 검증합니다.
+- Path Traversal 방지 + 화이트리스트 기반 접근 제어
 """
 
 import os
@@ -17,6 +17,8 @@ from pathlib import Path
 from pydantic import BaseModel, ValidationError, Field
 from typing import Optional
 
+from core.sandbox import SandboxManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,8 @@ class BaseTool(ABC):
     description: str
     parameters: dict
     input_model: Optional[type[BaseModel]] = None  # Pydantic 검증 모델
+    requires_sandbox: bool = True  # 샌드박스 검증 필수 여부
+    sandbox: Optional[SandboxManager] = None  # 런타임에 주입
 
     @abstractmethod
     async def execute(self, **kwargs) -> str:
@@ -94,11 +98,18 @@ class FileReadTool(BaseTool):
     async def execute(self, path: str) -> str:
         try:
             target_path = Path(path).resolve()
-            
-            # Simple Security Check: 현재 작업 디렉토리 내부인지 확인 (일단은 느슨하게 허용하되 로깅)
-            cwd = Path.cwd().resolve()
-            if not str(target_path).startswith(str(cwd)):
-                logger.warning(f"⚠️ [Security] 외부 경로 접근 시도: {target_path}")
+
+            # 샌드박스 경로 검증
+            if self.sandbox:
+                result = self.sandbox.validate_path(str(target_path), mode="read")
+                if not result.allowed:
+                    logger.warning(f"🛡️ [Security] 경로 차단: {path} → {result.reason}")
+                    return f"❌ Security: Access denied for path '{path}'. {result.reason}"
+            else:
+                # Fallback: 기본 cwd 검사
+                cwd = Path.cwd().resolve()
+                if not str(target_path).startswith(str(cwd)):
+                    logger.warning(f"⚠️ [Security] 외부 경로 접근 시도: {target_path}")
 
             if not target_path.exists():
                 return f"❌ Error: File not found: {path}"
@@ -134,7 +145,14 @@ class ListDirTool(BaseTool):
     async def execute(self, path: str = ".") -> str:
         try:
             target_path = Path(path).resolve()
-            
+
+            # 샌드박스 경로 검증
+            if self.sandbox:
+                result = self.sandbox.validate_path(str(target_path), mode="read")
+                if not result.allowed:
+                    logger.warning(f"🛡️ [Security] 경로 차단: {path} → {result.reason}")
+                    return f"❌ Security: Access denied for path '{path}'. {result.reason}"
+
             if not target_path.exists():
                 return f"❌ Error: Directory not found: {path}"
             
@@ -172,3 +190,9 @@ def get_tool_by_name(name: str) -> BaseTool | None:
         if tool.name == name:
             return tool
     return None
+
+def inject_sandbox(sandbox: SandboxManager) -> None:
+    """모든 도구에 SandboxManager를 주입합니다."""
+    for tool in AVAILABLE_TOOLS:
+        tool.sandbox = sandbox
+    logger.info(f"🛡️ Sandbox injected into {len(AVAILABLE_TOOLS)} tools")

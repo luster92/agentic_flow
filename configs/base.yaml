@@ -29,3 +29,46 @@ models:
 logging:
   level: "INFO"
   format: "%(asctime)s │ %(levelname)-7s │ %(name)-20s │ %(message)s"
+  structured_events: true              # Phase 4: 구조화 이벤트 출력
+
+# ── 보안 (Phase 2) ───────────────────────────────────────────
+security:
+  sandbox_enabled: true
+  allowed_read_paths:
+    - "."                              # 작업 디렉토리
+    - "~/.openclaw/"                   # OpenClaw 메모리
+  allowed_write_paths:
+    - "./output/"
+  blocked_commands:
+    - "rm -rf"
+    - "shutdown"
+    - "reboot"
+    - "mkfs"
+    - "dd if="
+    - "chmod -R 777"
+  max_execution_time: 30
+  max_memory_mb: 512
+
+# ── 모델 티어링 (Phase 3) ────────────────────────────────────
+model_tiering:
+  enabled: true
+  tiers:
+    simple:
+      models: ["local-helper"]
+      description: "요약, 분류, 번역"
+    standard:
+      models: ["local-worker"]
+      description: "코딩, 디버깅, 리팩토링"
+    complex:
+      models: ["cloud-pm-gemini", "cloud-pm-claude"]
+      description: "아키텍처, 전략, 복잡 추론"
+  cost_tracking:
+    enabled: true
+    alert_threshold_usd: 1.0
+
+# ── OpenClaw 연동 (Phase 5) ──────────────────────────────────
+openclaw:
+  enabled: false
+  base_dir: "~/.openclaw/"
+  soul_file: "SOUL.md"
+  memory_file: "MEMORY.md"
