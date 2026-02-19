@@ -7,3 +7,8 @@ sentence-transformers>=2.2.0
 mcp>=1.0.0
 pydantic>=2.0
 jinja2>=3.1
+fastmcp>=2.0.0
+psutil>=5.9.0
+# ── Apple Silicon 전용 (setup_m4.sh로 설치) ──
+# mlx>=0.22.0
+# mlx-lm>=0.22.0

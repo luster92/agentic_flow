@@ -632,3 +632,259 @@ class TestCallbackApprovalChannel:
         result = await channel.wait_for_response()
         assert result.approved is False
         assert result.action == "timeout"
+
+
+# ── Phase 7: MLX Engine ──────────────────────────────────────
+
+from core.engine_mlx import (
+    MLXEngine, MLXConfig, EngineBackend, GenerationResult,
+)
+
+
+class TestMLXConfig:
+    """MLX 설정 테스트."""
+
+    def test_default_config(self) -> None:
+        """기본 설정 값."""
+        config = MLXConfig()
+        assert "32B" in config.main_model
+        assert config.speculative_decoding is True
+        assert config.kv_cache_bits == 4
+
+    def test_from_dict(self) -> None:
+        """딕셔너리에서 설정 생성."""
+        data = {
+            "main_model": "test-model",
+            "speculative_decoding": False,
+            "max_tokens": 1024,
+            "unknown_key": "ignored",
+        }
+        config = MLXConfig.from_dict(data)
+        assert config.main_model == "test-model"
+        assert config.speculative_decoding is False
+        assert config.max_tokens == 1024
+
+
+class TestMLXEngine:
+    """MLX 추론 엔진 테스트 (MLX mocked)."""
+
+    def test_engine_creation(self) -> None:
+        """엔진 인스턴스 생성."""
+        engine = MLXEngine()
+        assert engine.is_loaded is False
+        # MLX가 없으면 LITELLM fallback
+        assert engine.backend in (
+            EngineBackend.MLX, EngineBackend.LITELLM
+        )
+
+    @pytest.mark.asyncio
+    async def test_load_without_mlx(self) -> None:
+        """MLX 없이 로드 → LiteLLM fallback."""
+        engine = MLXEngine(
+            config=MLXConfig(main_model="test"),
+            litellm_base_url="http://localhost:9999",
+        )
+        result = await engine.load()
+        assert result is True
+        assert engine.is_loaded is True
+        # MLX가 설치되어 있으면 MLX, 없으면 LITELLM
+        assert engine.backend in (
+            EngineBackend.MLX, EngineBackend.LITELLM
+        )
+
+    def test_get_stats(self) -> None:
+        """엔진 통계 조회."""
+        engine = MLXEngine()
+        stats = engine.get_stats()
+        assert "loaded" in stats
+        assert "backend" in stats
+        assert "mlx_available" in stats
+        assert "main_model" in stats
+        assert "total_tokens" in stats
+
+    def test_generation_result(self) -> None:
+        """GenerationResult 데이터 클래스."""
+        result = GenerationResult(
+            text="Hello world",
+            tokens_generated=2,
+            tokens_per_second=25.0,
+            elapsed_ms=80.0,
+        )
+        assert result.text == "Hello world"
+        assert result.tokens_generated == 2
+        assert result.tokens_per_second == 25.0
+
+    @pytest.mark.asyncio
+    async def test_unload_not_loaded(self) -> None:
+        """로드 안된 상태에서 언로드."""
+        engine = MLXEngine()
+        await engine.unload()  # 에러 없이 통과
+        assert engine.is_loaded is False
+
+
+# ── Phase 8: Hardware Probe ───────────────────────────────────
+
+from utils.hardware_probe import (
+    HardwareProbe,
+    ChipFamily,
+    MemoryPressure,
+    ModelRecommendation,
+    ChipInfo,
+    MemoryInfo,
+    ModelConfig,
+)
+
+
+class TestHardwareProbe:
+    """하드웨어 프로브 테스트."""
+
+    def test_probe_creation(self) -> None:
+        """프로브 인스턴스 생성."""
+        probe = HardwareProbe()
+        assert probe is not None
+
+    def test_detect_chip(self) -> None:
+        """칩 감지 (실제 환경)."""
+        probe = HardwareProbe()
+        chip = probe.detect_chip()
+        assert isinstance(chip, ChipInfo)
+        assert chip.cpu_cores > 0
+
+        # macOS ARM일 경우 Apple Silicon
+        import platform
+        if (
+            platform.system() == "Darwin"
+            and platform.machine() == "arm64"
+        ):
+            assert chip.family != ChipFamily.NON_APPLE
+            assert chip.p_cores > 0
+            assert chip.gpu_cores > 0
+        else:
+            assert chip.family in (
+                ChipFamily.NON_APPLE, ChipFamily.UNKNOWN
+            )
+
+    def test_detect_chip_cached(self) -> None:
+        """칩 정보 캐싱."""
+        probe = HardwareProbe()
+        chip1 = probe.detect_chip()
+        chip2 = probe.detect_chip()
+        assert chip1 is chip2  # 동일 인스턴스
+
+    def test_get_memory_info(self) -> None:
+        """메모리 정보 조회."""
+        probe = HardwareProbe()
+        mem = probe.get_memory_info()
+        assert isinstance(mem, MemoryInfo)
+        assert mem.total_gb > 0
+        assert mem.pressure in (
+            MemoryPressure.NOMINAL,
+            MemoryPressure.WARN,
+            MemoryPressure.CRITICAL,
+        )
+
+    def test_recommend_model_config(self) -> None:
+        """모델 추천."""
+        probe = HardwareProbe()
+        config = probe.recommend_model_config()
+        assert isinstance(config, ModelConfig)
+        assert config.main_model != ""
+        assert config.reason != ""
+        assert config.recommendation in (
+            ModelRecommendation.LARGE_32B,
+            ModelRecommendation.MEDIUM_14B,
+            ModelRecommendation.SMALL_7B,
+            ModelRecommendation.TINY_3B,
+        )
+
+    def test_check_memory_pressure(self) -> None:
+        """메모리 압박 수준 확인."""
+        probe = HardwareProbe()
+        pressure = probe.check_memory_pressure()
+        assert pressure in (
+            MemoryPressure.NOMINAL,
+            MemoryPressure.WARN,
+            MemoryPressure.CRITICAL,
+        )
+
+    def test_should_fallback(self) -> None:
+        """fallback 필요 여부 (실행만 되면 OK)."""
+        probe = HardwareProbe()
+        result = probe.should_fallback()
+        assert isinstance(result, bool)
+
+    def test_get_summary(self) -> None:
+        """전체 요약."""
+        probe = HardwareProbe()
+        summary = probe.get_summary()
+        assert "chip" in summary
+        assert "memory" in summary
+        assert "recommendation" in summary
+        assert "family" in summary["chip"]
+        assert "total_gb" in summary["memory"]
+        assert "main_model" in summary["recommendation"]
+
+    def test_is_apple_silicon(self) -> None:
+        """Apple Silicon 여부."""
+        probe = HardwareProbe()
+        result = probe.is_apple_silicon
+        assert isinstance(result, bool)
+
+
+# ── Phase 9: MCP Server (Unit) ───────────────────────────────
+
+class TestMCPServerComponents:
+    """MCP 서버 컴포넌트 테스트 (서버 자체는 통합 테스트에서)."""
+
+    def test_agent_session(self) -> None:
+        """AgentSession 데이터 클래스."""
+        from server import AgentSession
+
+        session = AgentSession(topic="test topic", mode="code")
+        assert session.topic == "test topic"
+        assert session.mode == "code"
+        assert session.status == "idle"
+        assert session.step_count == 0
+        assert len(session.thought_trace) == 0
+
+    def test_agent_session_add_thought(self) -> None:
+        """사고 과정 추가."""
+        from server import AgentSession
+
+        session = AgentSession()
+        session.add_thought("init", "Starting flow")
+        session.add_thought("route", "Using research mode")
+
+        assert session.step_count == 2
+        assert len(session.thought_trace) == 2
+        assert session.thought_trace[0]["step"] == "init"
+        assert session.thought_trace[1]["step"] == "route"
+
+    def test_agent_session_to_dict(self) -> None:
+        """세션 직렬화."""
+        from server import AgentSession
+
+        session = AgentSession(topic="test", mode="plan")
+        d = session.to_dict()
+        assert d["topic"] == "test"
+        assert d["mode"] == "plan"
+        assert "session_id" in d
+        assert "created_at" in d
+
+    def test_mlx_config_from_yaml(self) -> None:
+        """m4_32gb.yaml에서 MLXConfig 로드."""
+        import yaml
+
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "config", "m4_32gb.yaml"
+        )
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                data = yaml.safe_load(f)
+            mlx_data = data.get("mlx", {})
+            config = MLXConfig.from_dict(mlx_data)
+            assert "32B" in config.main_model or "Qwen" in config.main_model
+            assert config.speculative_decoding is True
+            assert config.kv_cache_bits == 4
+

@@ -1,0 +1,60 @@
+# ============================================================
+# M4 32GB 전용 하드웨어 프로파일
+# ============================================================
+# Mac Mini M4 (10-core CPU, 10-core GPU, 32GB Unified Memory)
+# 최적화 대상: Qwen2.5-32B-Instruct-4bit + Speculative Decoding
+# ============================================================
+
+hardware:
+  chip: "m4"
+  memory_gb: 32
+  cpu_cores: 10
+  p_cores: 4
+  e_cores: 6
+  gpu_cores: 10
+  memory_bandwidth_gbps: 120
+
+# ── MLX 추론 설정 ──────────────────────────────────────────────
+mlx:
+  main_model: "mlx-community/Qwen2.5-32B-Instruct-4bit"
+  draft_model: "mlx-community/Qwen2.5-0.5B-Instruct-4bit"
+  speculative_decoding: true
+  kv_cache_bits: 4
+  max_context_length: 8192
+  max_tokens: 2048
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.1
+
+# ── 메모리 맵 (32GB 기준) ─────────────────────────────────────
+# 구성 요소           | 메모리 (GB) | 비고
+# --------------------|-------------|---------------------------
+# 메인 모델 (32B Q4)  | 19.5        | 추론의 핵심
+# 드래프트 모델 (0.5B) | 0.4         | 투기적 디코딩용
+# KV Cache (4-bit)    | 1.5         | 컨텍스트 8k 기준
+# OpenClaw Runtime    | 2.0         | Node.js + Gateway
+# macOS               | 4.0         | Kernel + WindowServer
+# 여유 공간           | 4.6         | 스파이크 방지
+# --------------------|-------------|---------------------------
+# 합계                | 32.0        |
+
+memory_limits:
+  model_budget_gb: 22.0             # 모델 + 드래프트 한도
+  kv_cache_budget_gb: 2.0           # KV Cache 한도
+  fallback_threshold_gb: 4.0        # 이 이하이면 경량 모델 전환
+  wired_limit_mb: 26624             # sysctl iogpu.wired_limit_mb 권장값
+
+# ── Fallback 모델 (메모리 부족 시) ─────────────────────────────
+fallback:
+  model: "mlx-community/Qwen2.5-14B-Instruct-4bit"
+  draft_model: ""
+  speculative_decoding: false
+  kv_cache_bits: 4
+  max_context_length: 4096
+
+# ── QoS 설정 ──────────────────────────────────────────────────
+qos:
+  # 에이전트 프로세스를 P-core에 할당
+  prefer_performance_cores: true
+  # taskpolicy 명령어 사용 (macOS)
+  taskpolicy_level: "default"       # default | utility | background

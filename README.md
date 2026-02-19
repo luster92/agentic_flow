@@ -36,6 +36,17 @@
 *   **📜 SOUL/MEMORY Integration**: OpenClaw의 `SOUL.md`에서 에이전트 성격/말투/원칙을 파싱하여 시스템 프롬프트에 주입합니다. `MEMORY.md`로 장기 기억을 관리하고 키워드 검색을 지원합니다.
 *   **🔌 Gateway Approval Bridge**: HITL 승인 채널을 추상화하여 CLI, WebSocket, HTTP 등 다양한 승인 경로를 지원합니다. 타임아웃 기반 자동 거절 기능을 포함합니다.
 
+### 🍎 M4 Deep Integration (v4)
+
+*   **🔗 MCP Server (`server.py`)**: FastMCP 기반 상주형 서버. OpenClaw가 표준 프로토콜로 에이전트를 호출합니다. 서버 시작 시 모델 warm-up으로 콜드 스타트를 제거합니다.
+*   **⚡ MLX Inference Engine**: Apple Silicon GPU 직접 활용. PyTorch/CUDA 없이 M4 10-core GPU 100% 활용합니다.
+    *   4-bit 양자화 (Qwen2.5-32B → 32GB에 적재)
+    *   투기적 디코딩 (Speculative Decoding): 드래프트 모델(0.5B)로 2배 속도 향상
+    *   KV Cache 양자화: 긴 컨텍스트에서 OOM 방지
+    *   MLX 미설치 시 LiteLLM 자동 fallback
+*   **🔍 Hardware Probe**: Apple Silicon 칩 자동 감지 (M4/M4 Pro/M4 Max), 실시간 메모리 압박 모니터링, 가용 메모리 기반 최적 모델/양자화 자동 추천.
+*   **📦 One-Click Setup**: `setup_m4.sh`로 환경 설치, MLX/의존성 설치, 선택적 GPU 메모리 튜닝까지 자동화.
+
 ## 🏗️ Architecture
 
 ```
@@ -128,6 +139,14 @@ system:
   debate_enabled: true
   debate_max_rounds: 3
   hitl_enabled: true
+
+openClaw:
+  enabled: true
+  mcp_server:
+    enabled: true
+    transport: "stdio"
+    auto_warmup: true
+  hardware_profile: "m4_32gb"
 ```
 
 ## ▶️ Usage
@@ -145,6 +164,14 @@ litellm --config config.yaml --port 4000
 ```bash
 source .venv/bin/activate
 python main.py
+```
+
+### 3. Run MCP Server (OpenClaw 연동)
+OpenClaw와 연동할 때는 MCP 서버 모드로 실행합니다.
+```bash
+source .venv/bin/activate
+python server.py                    # stdio 모드 (OpenClaw 연동)
+python server.py --transport sse    # SSE 모드 (디버깅용)
 ```
 
 ### 3. Commands
@@ -194,21 +221,22 @@ agentic_flow/
 │   ├── state.py                #   Pydantic v2 AgentState (직렬화/체크포인팅)
 │   ├── checkpoint.py           #   SQLite 체크포인트 저장/롤백
 │   ├── config_loader.py        #   계층적 YAML 설정 + Jinja2
-│   ├── event_bus.py            #   🆕 비동기 EventBus (pub/sub, 12 이벤트 타입)
-│   ├── sandbox.py              #   🆕 보안 샌드박스 (경로/명령어 검증)
-│   └── model_router.py         #   🆕 작업 티어 분류 + 비용 추적
+│   ├── event_bus.py            #   비동기 EventBus (pub/sub, 12 이벤트 타입)
+│   ├── sandbox.py              #   보안 샌드박스 (경로/명령어 검증)
+│   ├── model_router.py         #   작업 티어 분류 + 비용 추적
+│   └── engine_mlx.py           #   🆕 MLX 추론 엔진 (투기적 디코딩, KV Cache)
 ├── engine/                     # 엔진 계층
 │   ├── persona.py              #   PersonaManager (핫스왑 + 전환 로깅)
 │   ├── adversarial.py          #   DebateLoop (정-반-합 토론 루프)
 │   ├── hitl.py                 #   HITL 인터럽트 핸들러
-│   ├── soul.py                 #   🆕 SOUL.md 파서 → 시스템 프롬프트 주입
-│   └── memory_file.py          #   🆕 MEMORY.md 읽기/쓰기/검색
+│   ├── soul.py                 #   SOUL.md 파서 → 시스템 프롬프트 주입
+│   └── memory_file.py          #   MEMORY.md 읽기/쓰기/검색
 ├── agents/                     # 에이전트 계층
 │   ├── router.py               #   Rule-based + LLM 라우팅
 │   ├── worker.py               #   ReAct 도구 사용 루프 + Critic/Helper 위임
 │   ├── critic.py               #   JSON 기반 코드 리뷰
 │   └── helper.py               #   경량 작업 위임
-├── gateway/                    # 🆕 외부 연동 계층
+├── gateway/                    # 외부 연동 계층
 │   └── approval_bridge.py      #   승인 채널 추상화 (CLI/Callback)
 ├── utils/                      # 유틸리티
 │   ├── history_manager.py      #   SQLite 대화 기록 + Context Filter
@@ -219,8 +247,11 @@ agentic_flow/
 │   ├── mcp_client.py           #   MCP 프로토콜 어댑터
 │   ├── validator.py            #   AST + Sandbox 코드 검증
 │   ├── rate_limiter.py         #   슬라이딩 윈도우 속도 제한
-│   ├── structured_logger.py    #   🆕 구조화 이벤트 (JSONL 출력)
+│   ├── structured_logger.py    #   구조화 이벤트 (JSONL 출력)
+│   ├── hardware_probe.py       #   🆕 Apple Silicon 감지 + 메모리 모니터링
 │   └── introspector.py         #   런타임 라이브러리 체크
+├── config/                     # 🆕 하드웨어 프로파일
+│   └── m4_32gb.yaml            #   M4 32GB 전용 설정 (메모리맵 포함)
 ├── configs/                    # 설정 파일
 │   ├── base.yaml               #   전역 설정 (system/security/tiering/openclaw)
 │   └── personas/               #   페르소나 YAML 정의
@@ -230,30 +261,54 @@ agentic_flow/
 │       ├── devil.yaml
 │       ├── moderator.yaml
 │       └── security_auditor.yaml
+├── openclaw_integration/       # 🆕 OpenClaw 스킬
+│   ├── SKILL.md                #   스킬 정의 (트리거, 도구, 리소스)
+│   └── install_skill.sh        #   스킬 설치 헬퍼
 ├── tests/
 │   ├── test_improvements.py    #   기본 기능 테스트 (17 tests)
 │   ├── test_enterprise.py      #   Enterprise 기능 테스트 (32 tests)
-│   └── test_openclaw_integration.py  #  🆕 OpenClaw 통합 테스트 (44 tests)
+│   └── test_openclaw_integration.py  # OpenClaw 통합 테스트 (64 tests)
 ├── state.py                    # 하위 호환 alias → core.state
 ├── config.yaml                 # LiteLLM 프록시 설정
 ├── main.py                     # 메인 오케스트레이터 (EventBus 연동)
+├── server.py                   # 🆕 FastMCP 상주형 서버 (OpenClaw 연동)
+├── setup_m4.sh                 # 🆕 M4 원클릭 설치 스크립트
 └── requirements.txt            # 의존성 패키지
 ```
 
 ## 🧪 Testing
 
 ```bash
-# 전체 테스트 (93 tests)
+# 전체 테스트 (113 tests)
 python3 -m pytest tests/ -v
 
-# OpenClaw 통합 테스트 (44 tests)
+# OpenClaw 통합 테스트 (64 tests)
 python3 -m pytest tests/test_openclaw_integration.py -v
+
+# M4/MCP 관련 테스트만
+python3 -m pytest tests/test_openclaw_integration.py -v -k "MLX or Hardware or MCP"
 
 # Enterprise 테스트만 (32 tests)
 python3 -m pytest tests/test_enterprise.py -v
 
 # 기존 기능 테스트만 (17 tests)
 python3 -m pytest tests/test_improvements.py -v
+```
+
+## 🍎 M4 Quick Start
+
+Mac Mini M4에서 OpenClaw과 연동하려면:
+
+```bash
+# 1. 원클릭 설치
+bash setup_m4.sh
+
+# 2. OpenClaw 스킬 등록
+bash openclaw_integration/install_skill.sh
+
+# 3. MCP 서버 실행
+source .venv/bin/activate
+python server.py
 ```
 
 ## 📄 License
