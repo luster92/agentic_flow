@@ -1,0 +1,74 @@
+# ============================================================
+# M4 16GB 전용 하드웨어 프로파일 (Edge Environment)
+# ============================================================
+# Apple Silicon 16GB Unified Memory — "무자비한 효율성"
+# 최적화 대상: Qwen2.5-14B-Instruct-4bit (스왑 방지 우선)
+# ============================================================
+
+hardware:
+  chip: "m4"
+  memory_gb: 16
+  cpu_cores: 10
+  p_cores: 4
+  e_cores: 6
+  gpu_cores: 10
+  memory_bandwidth_gbps: 120
+
+# ── MLX 추론 설정 ──────────────────────────────────────────────
+mlx:
+  main_model: "mlx-community/Qwen2.5-14B-Instruct-4bit"
+  draft_model: ""
+  speculative_decoding: false
+  kv_cache_bits: 4
+  max_context_length: 4096
+  max_tokens: 1024
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.1
+
+# ── 메모리 맵 (16GB 기준) ─────────────────────────────────────
+# 구성 요소           | 메모리 (GB) | 비고
+# --------------------|-------------|---------------------------
+# 메인 모델 (14B Q4)  | 9.0         | 추론의 핵심
+# 드래프트 모델       | 0.0         | 메모리 부족으로 비활성
+# KV Cache (4-bit)    | 0.8         | 컨텍스트 4k 기준
+# OpenClaw Runtime    | 1.0         | Node.js + Gateway (경량)
+# macOS               | 4.0         | Kernel + WindowServer
+# 여유 공간           | 1.2         | 최소 스파이크 방지
+# --------------------|-------------|---------------------------
+# 합계                | 16.0        |
+
+memory_limits:
+  model_budget_gb: 10.0             # 모델 한도 (드래프트 없음)
+  kv_cache_budget_gb: 1.0           # KV Cache 한도 (엄격)
+  fallback_threshold_gb: 2.0        # 이 이하이면 경량 모델 전환
+  wired_limit_mb: 12288             # sysctl iogpu.wired_limit_mb 권장값
+
+# ── Context Pruning (필수) ─────────────────────────────────────
+context_pruning:
+  mode: "sliding-window"            # 슬라이딩 윈도우: 오래된 대화 자동 삭제
+  window_size: 4096                 # 최대 토큰 수 (엄격 제한)
+  keep_system_prompt: true          # 시스템 프롬프트는 항상 유지
+
+# ── Vision 제한 ────────────────────────────────────────────────
+vision:
+  image_max_dimension_px: 800       # 고해상도 → 메모리 스파이크 방지
+
+# ── Fallback 모델 (메모리 부족 시) ─────────────────────────────
+fallback:
+  model: "mlx-community/Qwen2.5-7B-Instruct-4bit"
+  draft_model: ""
+  speculative_decoding: false
+  kv_cache_bits: 4
+  max_context_length: 2048
+
+# ── QoS 설정 ──────────────────────────────────────────────────
+qos:
+  prefer_performance_cores: true
+  taskpolicy_level: "default"
+
+# ── Sandbox 제한 ──────────────────────────────────────────────
+sandbox:
+  mode: "docker"
+  memory_limit: "2gb"               # 도구 실행 컨테이너 메모리 제한
+  timeout: "30s"

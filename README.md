@@ -40,12 +40,13 @@
 
 *   **🔗 MCP Server (`server.py`)**: FastMCP 기반 상주형 서버. OpenClaw가 표준 프로토콜로 에이전트를 호출합니다. 서버 시작 시 모델 warm-up으로 콜드 스타트를 제거합니다.
 *   **⚡ MLX Inference Engine**: Apple Silicon GPU 직접 활용. PyTorch/CUDA 없이 M4 10-core GPU 100% 활용합니다.
-    *   4-bit 양자화 (Qwen2.5-32B → 32GB에 적재)
-    *   투기적 디코딩 (Speculative Decoding): 드래프트 모델(0.5B)로 2배 속도 향상
-    *   KV Cache 양자화: 긴 컨텍스트에서 OOM 방지
+    *   **RAM Tiering**: 16GB(Edge), 32GB(Standard), 64GB(Workstation), 128GB(Enterprise) 자동 감지
+    *   **Speculative Decoding**: 64GB+ 환경에서 70B 모델 가속 (드래프트 모델 활용)
+    *   **In-Memory RAG**: 128GB 환경에서 벡터 인덱스를 RAM에 캐싱하여 초고속 검색
     *   MLX 미설치 시 LiteLLM 자동 fallback
-*   **🔍 Hardware Probe**: Apple Silicon 칩 자동 감지 (M4/M4 Pro/M4 Max), 실시간 메모리 압박 모니터링, 가용 메모리 기반 최적 모델/양자화 자동 추천.
-*   **📦 One-Click Setup**: `setup_m4.sh`로 환경 설치, MLX/의존성 설치, 선택적 GPU 메모리 튜닝까지 자동화.
+*   **🔍 Hardware Probe**: Apple Silicon 칩 자동 감지 (M4/M4 Pro/M4 Max/M4 Ultra), 실시간 메모리 압박 모니터링.
+*   **🎹 Auto-Tune Skill**: `scripts/autotune.py`로 HuggingFace의 최신 MLX 모델을 탐색하고 시스템에 맞는 최적 설정을 자동 적용합니다.
+*   **📦 One-Click Setup**: `setup_m4.sh`로 환경 설치, MLX/의존성 설치, 메모리 용량별 sysctl 튜닝 자동화.
 
 ## 🏗️ Architecture
 
@@ -146,7 +147,7 @@ openClaw:
     enabled: true
     transport: "stdio"
     auto_warmup: true
-  hardware_profile: "m4_32gb"
+  hardware_profile: "auto"       # "auto" (RAM 감지) 또는 "m4_64gb" 등 수동 지정
 ```
 
 ## ▶️ Usage
@@ -172,6 +173,16 @@ OpenClaw와 연동할 때는 MCP 서버 모드로 실행합니다.
 source .venv/bin/activate
 python server.py                    # stdio 모드 (OpenClaw 연동)
 python server.py --transport sse    # SSE 모드 (디버깅용)
+```
+
+### 4. Auto-Tune (New)
+시스템에 가장 적합한 모델을 자동으로 찾아 설정합니다.
+```bash
+# 현재 상태 진단 및 추천
+python scripts/autotune.py --mode check
+
+# 최적 모델로 설정 자동 업데이트
+python scripts/autotune.py --mode update
 ```
 
 ### 3. Commands
@@ -250,8 +261,11 @@ agentic_flow/
 │   ├── structured_logger.py    #   구조화 이벤트 (JSONL 출력)
 │   ├── hardware_probe.py       #   🆕 Apple Silicon 감지 + 메모리 모니터링
 │   └── introspector.py         #   런타임 라이브러리 체크
-├── config/                     # 🆕 하드웨어 프로파일
-│   └── m4_32gb.yaml            #   M4 32GB 전용 설정 (메모리맵 포함)
+├── config/                     # 🆕 하드웨어 프로파일 (RAM Tier)
+│   ├── m4_16gb.yaml            #   16GB Edge (14B Q4)
+│   ├── m4_32gb.yaml            #   32GB Standard (32B Q4)
+│   ├── m4_64gb.yaml            #   64GB Workstation (70B Q4 + Speculative)
+│   └── m4_128gb.yaml           #   128GB Enterprise (72B Q8 + In-Memory RAG)
 ├── configs/                    # 설정 파일
 │   ├── base.yaml               #   전역 설정 (system/security/tiering/openclaw)
 │   └── personas/               #   페르소나 YAML 정의

@@ -1,0 +1,75 @@
+# ============================================================
+# M4 64GB 전용 하드웨어 프로파일 (Workstation)
+# ============================================================
+# Apple Silicon 64GB (M4 Pro/Max) — "추측 실행을 통한 성능 가속"
+# 최적화 대상: Llama-3.3-70B-Instruct-4bit + Speculative Decoding
+# ============================================================
+
+hardware:
+  chip: "m4_pro"
+  memory_gb: 64
+  cpu_cores: 14
+  p_cores: 10
+  e_cores: 4
+  gpu_cores: 20
+  memory_bandwidth_gbps: 273
+
+# ── MLX 추론 설정 ──────────────────────────────────────────────
+mlx:
+  main_model: "mlx-community/Llama-3.3-70B-Instruct-4bit"
+  draft_model: "mlx-community/Llama-3.2-1B-Instruct-4bit"
+  speculative_decoding: true
+  draft_steps: 5                    # 한 번에 예측할 토큰 수
+  kv_cache_bits: 8
+  max_context_length: 32768
+  max_tokens: 4096
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.1
+
+# ── 메모리 맵 (64GB 기준) ─────────────────────────────────────
+# 구성 요소           | 메모리 (GB) | 비고
+# --------------------|-------------|---------------------------
+# 메인 모델 (70B Q4)  | 40.0        | 창발적 추론 능력
+# 드래프트 모델 (1B)  | 0.7         | 투기적 디코딩용
+# KV Cache (8-bit)    | 5.0         | 컨텍스트 32k 기준
+# OpenClaw Runtime    | 2.0         | Node.js + Gateway
+# macOS               | 6.0         | Kernel + WindowServer + Apps
+# 여유 공간           | 10.3        | 멀티태스킹 여유
+# --------------------|-------------|---------------------------
+# 합계                | 64.0        |
+
+memory_limits:
+  model_budget_gb: 44.0             # 모델 + 드래프트 한도
+  kv_cache_budget_gb: 6.0           # KV Cache 한도
+  fallback_threshold_gb: 6.0        # 이 이하이면 경량 모델 전환
+  wired_limit_mb: 53248             # sysctl iogpu.wired_limit_mb 권장값 (52GB)
+
+# ── Context Pruning ───────────────────────────────────────────
+context_pruning:
+  mode: "token-budget"              # 토큰 예산 방식 (중요 문맥 보존)
+  budget: 32000                     # 32k 토큰 (~50페이지 분량)
+  keep_system_prompt: true
+
+# ── Vision ─────────────────────────────────────────────────────
+vision:
+  image_max_dimension_px: 1568      # 고해상도 비전 처리 허용
+
+# ── Fallback 모델 (메모리 부족 시) ─────────────────────────────
+fallback:
+  model: "mlx-community/Qwen2.5-32B-Instruct-4bit"
+  draft_model: "mlx-community/Qwen2.5-0.5B-Instruct-4bit"
+  speculative_decoding: true
+  kv_cache_bits: 4
+  max_context_length: 16384
+
+# ── QoS 설정 ──────────────────────────────────────────────────
+qos:
+  prefer_performance_cores: true
+  taskpolicy_level: "default"
+
+# ── Sandbox 설정 ──────────────────────────────────────────────
+sandbox:
+  mode: "docker"
+  memory_limit: "8gb"               # 넉넉한 도구 실행 메모리
+  timeout: "120s"                   # 복잡한 추론 작업 허용

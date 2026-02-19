@@ -40,6 +40,7 @@ class ChipFamily(str, Enum):
     M4 = "m4"
     M4_PRO = "m4_pro"
     M4_MAX = "m4_max"
+    M4_ULTRA = "m4_ultra"
     M3 = "m3"
     M2 = "m2"
     M1 = "m1"
@@ -56,6 +57,8 @@ class MemoryPressure(str, Enum):
 
 class ModelRecommendation(str, Enum):
     """추천 모델 크기."""
+    ULTRA_72B = "72b_8bit"    # 128GB: 72B 8-bit 고정밀
+    XLARGE_70B = "70b"        # 64GB: 70B 4-bit 투기적 디코딩
     LARGE_32B = "32b"
     MEDIUM_14B = "14b"
     SMALL_7B = "7b"
@@ -111,8 +114,9 @@ class HardwareProbe:
     # M4 칩 계열별 표준 코어 구성
     CHIP_PROFILES: dict[str, dict[str, int]] = {
         "m4": {"p_cores": 4, "e_cores": 6, "gpu_cores": 10},
-        "m4 pro": {"p_cores": 10, "e_cores": 4, "gpu_cores": 16},
+        "m4 pro": {"p_cores": 10, "e_cores": 4, "gpu_cores": 20},
         "m4 max": {"p_cores": 12, "e_cores": 4, "gpu_cores": 40},
+        "m4 ultra": {"p_cores": 16, "e_cores": 16, "gpu_cores": 80},
         "m3": {"p_cores": 4, "e_cores": 4, "gpu_cores": 10},
         "m2": {"p_cores": 4, "e_cores": 4, "gpu_cores": 10},
         "m1": {"p_cores": 4, "e_cores": 4, "gpu_cores": 8},
@@ -170,6 +174,7 @@ class HardwareProbe:
 
         # 칩 계열 판별
         family_map = {
+            "m4 ultra": ChipFamily.M4_ULTRA,
             "m4 max": ChipFamily.M4_MAX,
             "m4 pro": ChipFamily.M4_PRO,
             "m4": ChipFamily.M4,
@@ -298,19 +303,32 @@ class HardwareProbe:
                 reason="Non-Apple Silicon: using LiteLLM proxy",
             )
 
-        # 메모리 기반 추천
+        # 메모리 기반 추천 (계층적 티어링)
         available = mem.total_gb
 
-        if available >= 64:
+        if available >= 128:
+            # Tier 3: Enterprise (128GB) — 72B 8-bit 고정밀 + 인메모리 RAG
             return ModelConfig(
-                recommendation=ModelRecommendation.LARGE_32B,
-                main_model="mlx-community/Qwen2.5-32B-Instruct-4bit",
-                draft_model="mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+                recommendation=ModelRecommendation.ULTRA_72B,
+                main_model="mlx-community/Qwen2.5-72B-Instruct-8bit",
+                draft_model="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+                quantization_bits=8,
+                kv_cache_bits=8,
+                max_context_length=131072,
+                speculative_decoding=True,
+                reason="128GB RAM: 72B 8-bit full precision with 128k context",
+            )
+        elif available >= 64:
+            # Tier 2: Workstation (64GB) — 70B 4-bit + 투기적 디코딩
+            return ModelConfig(
+                recommendation=ModelRecommendation.XLARGE_70B,
+                main_model="mlx-community/Llama-3.3-70B-Instruct-4bit",
+                draft_model="mlx-community/Llama-3.2-1B-Instruct-4bit",
                 quantization_bits=4,
                 kv_cache_bits=8,
-                max_context_length=16384,
+                max_context_length=32768,
                 speculative_decoding=True,
-                reason=f"64GB+ RAM: Full 32B with 8-bit KV cache",
+                reason="64GB RAM: 70B with speculative decoding",
             )
         elif available >= 32:
             return ModelConfig(
@@ -321,18 +339,19 @@ class HardwareProbe:
                 kv_cache_bits=4,
                 max_context_length=8192,
                 speculative_decoding=True,
-                reason=f"32GB RAM: 32B with 4-bit KV cache (tight fit)",
+                reason="32GB RAM: 32B with 4-bit KV cache (tight fit)",
             )
         elif available >= 16:
+            # Tier 1: Edge (16GB) — 14B 4-bit, 투기적 디코딩 비활성
             return ModelConfig(
                 recommendation=ModelRecommendation.MEDIUM_14B,
                 main_model="mlx-community/Qwen2.5-14B-Instruct-4bit",
-                draft_model="mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+                draft_model="",
                 quantization_bits=4,
                 kv_cache_bits=4,
-                max_context_length=8192,
-                speculative_decoding=True,
-                reason=f"16GB RAM: 14B model recommended",
+                max_context_length=4096,
+                speculative_decoding=False,
+                reason="16GB RAM: 14B model, no speculative decoding",
             )
         else:
             return ModelConfig(
@@ -341,9 +360,9 @@ class HardwareProbe:
                 draft_model="",
                 quantization_bits=4,
                 kv_cache_bits=4,
-                max_context_length=4096,
+                max_context_length=2048,
                 speculative_decoding=False,
-                reason=f"<16GB RAM: 7B model, no speculative decoding",
+                reason="<16GB RAM: 7B model, no speculative decoding",
             )
 
     # ── 메모리 압박 체크 ──────────────────────────────────

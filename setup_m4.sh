@@ -143,7 +143,7 @@ pip install -r "$SCRIPT_DIR/requirements.txt" -q
 
 # Apple Silicon 전용 패키지
 echo -e "  Apple Silicon 전용 패키지 설치 중..."
-pip install mlx mlx-lm fastmcp psutil -q
+pip install mlx mlx-lm fastmcp psutil huggingface_hub -q
 
 echo -e "${GREEN}  ✅ 모든 의존성 설치 완료${NC}"
 
@@ -152,7 +152,11 @@ echo ""
 echo -e "${BLUE}[5/6] 시스템 최적화...${NC}"
 
 if [ "$APPLY_SYSCTL" = true ]; then
-    if [ "$MEM_GB" -ge 32 ]; then
+    if [ "$MEM_GB" -ge 128 ]; then
+        WIRED_LIMIT=110592 # 108GB for 128GB systems
+    elif [ "$MEM_GB" -ge 64 ]; then
+        WIRED_LIMIT=53248  # 52GB for 64GB systems
+    elif [ "$MEM_GB" -ge 32 ]; then
         WIRED_LIMIT=26624  # 26GB for 32GB systems
     elif [ "$MEM_GB" -ge 16 ]; then
         WIRED_LIMIT=12288  # 12GB for 16GB systems

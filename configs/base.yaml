@@ -77,4 +77,6 @@ openclaw:
     transport: "stdio"           # stdio | sse
     auto_warmup: true            # 서버 시작 시 모델 자동 로드
     sse_port: 8765               # SSE 모드 포트
-  hardware_profile: "m4_32gb"    # config/ 디렉토리의 프로파일
+  # 하드웨어 프로파일: "auto" = RAM 자동 감지
+  # 수동 지정: m4_16gb | m4_32gb | m4_64gb | m4_128gb
+  hardware_profile: "auto"

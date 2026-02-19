@@ -89,19 +89,66 @@ sessions: dict[str, AgentSession] = {}
 probe = HardwareProbe()
 
 
+def _detect_ram_tier() -> str:
+    """시스템 RAM을 감지하여 적절한 프로파일 이름을 반환합니다."""
+    mem = probe.get_memory_info()
+    total = mem.total_gb
+    if total >= 128:
+        return "m4_128gb"
+    elif total >= 64:
+        return "m4_64gb"
+    elif total >= 32:
+        return "m4_32gb"
+    else:
+        return "m4_16gb"
+
+
 def _load_mlx_config() -> MLXConfig:
-    """config/m4_32gb.yaml에서 MLX 설정을 로드합니다."""
+    """RAM 환경에 맞는 하드웨어 프로파일에서 MLX 설정을 로드합니다.
+
+    프로파일 선택 우선순위:
+    1. configs/base.yaml의 hardware_profile 값 (수동 지정)
+    2. "auto"이면 시스템 RAM 자동 감지
+    """
+    # base.yaml에서 hardware_profile 설정 확인
+    base_config_path = os.path.join(
+        os.path.dirname(__file__), "configs", "base.yaml"
+    )
+    profile_name: str = "auto"
+    if os.path.exists(base_config_path):
+        try:
+            with open(base_config_path, "r", encoding="utf-8") as f:
+                base_data = yaml.safe_load(f) or {}
+            profile_name = (
+                base_data.get("openclaw", {}).get("hardware_profile", "auto")
+            )
+        except Exception:
+            pass
+
+    # 자동 감지 또는 명시적 프로파일
+    if profile_name == "auto":
+        profile_name = _detect_ram_tier()
+        logger.info(f"🔍 Auto-detected RAM tier: {profile_name}")
+    else:
+        logger.info(f"📋 Using configured profile: {profile_name}")
+
     config_path = os.path.join(
-        os.path.dirname(__file__), "config", "m4_32gb.yaml"
+        os.path.dirname(__file__), "config", f"{profile_name}.yaml"
     )
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             mlx_data = data.get("mlx", {})
+            logger.info(
+                f"✅ Loaded profile: {profile_name} "
+                f"(model: {mlx_data.get('main_model', 'N/A')})"
+            )
             return MLXConfig.from_dict(mlx_data)
         except Exception as e:
             logger.warning(f"⚠️ Config load failed, using defaults: {e}")
+
+    logger.warning(f"⚠️ Profile {profile_name}.yaml not found, using defaults")
     return MLXConfig()
 
 
