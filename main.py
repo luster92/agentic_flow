@@ -56,6 +56,7 @@ from engine.hitl import HITLManager, WaitApproval
 from utils.history_manager import HistoryManager, DEFAULT_HISTORY_DIR
 from utils.mcp_client import global_mcp_manager
 from utils.semantic_cache import SemanticCache
+from core.observability import TokenUsageTracker
 
 # ── 환경 설정 ─────────────────────────────────────────────────
 load_dotenv()
@@ -125,6 +126,8 @@ async def call_cloud_pm(
     messages.append({"role": "user", "content": task})
 
     try:
+        tracker = TokenUsageTracker(agent_name=CLOUD_MODEL_NAME)
+        
         if stream:
             response_stream = await client.chat.completions.create(
                 model=model_name,
@@ -132,6 +135,7 @@ async def call_cloud_pm(
                 temperature=persona_manager.get_temperature() if persona_manager else 0.5,
                 max_tokens=4096,
                 stream=True,
+                stream_options={"include_usage": True},
             )
             chunks = []
             print("\n🤖 Assistant > ", end="", flush=True)
@@ -139,6 +143,15 @@ async def call_cloud_pm(
                 content = chunk.choices[0].delta.content or ""
                 print(content, end="", flush=True)
                 chunks.append(content)
+                
+                # 수동 토큰 트래킹 파싱 (LiteLLM/OpenAI 스트림 구조)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    prompt_info = getattr(chunk.usage, "prompt_tokens", 0)
+                    completion_info = getattr(chunk.usage, "completion_tokens", 0)
+                    # mock LLMResult for callback
+                    mock_res = type('Result', (), {'llm_output': {'token_usage': {'prompt_tokens': prompt_info, 'completion_tokens': completion_info}, 'model_name': model_name}})()
+                    tracker.on_llm_end(mock_res)
+
             print()
             return "".join(chunks) or "[Cloud PM returned empty response]"
         else:
@@ -148,6 +161,14 @@ async def call_cloud_pm(
                 temperature=persona_manager.get_temperature() if persona_manager else 0.5,
                 max_tokens=4096,
             )
+            
+            # 수동 토큰 트래킹 파싱
+            if hasattr(response, "usage") and response.usage:
+                prompt_info = getattr(response.usage, "prompt_tokens", 0)
+                completion_info = getattr(response.usage, "completion_tokens", 0)
+                mock_res = type('Result', (), {'llm_output': {'token_usage': {'prompt_tokens': prompt_info, 'completion_tokens': completion_info}, 'model_name': model_name}})()
+                tracker.on_llm_end(mock_res)
+                
             return response.choices[0].message.content or "[Cloud PM returned empty response]"
     except Exception as e:
         logger.error(f"❌ Cloud PM 호출 실패 ({model_name}): {e}")

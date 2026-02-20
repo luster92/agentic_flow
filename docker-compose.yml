@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # ── 1. Backend PostgreSQL Database (LangGraph Checkpoints) ──
+  postgres:
+    image: postgres:15-alpine
+    container_name: agentic_flow_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-agentic_flow}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── 2. Redis Pub/Sub (Halt Events & Rate Limiting) ──
+  redis:
+    image: redis:7-alpine
+    container_name: agentic_flow_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── 3. FastAPI Backend (Orchestration API) ──
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: agentic_flow_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER:-postgres}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - DB_NAME=${POSTGRES_DB:-agentic_flow}
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-super-secret-key-change-in-prod}
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://host.docker.internal:4000}
+    volumes:
+      # Optional: Mount local history if needed
+      - ./history:/app/history
+    restart: unless-stopped
+
+  # ── 4. Next.js Frontend (Generative UI) ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agentic_flow_frontend
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

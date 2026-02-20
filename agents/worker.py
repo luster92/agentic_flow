@@ -30,6 +30,7 @@ from utils.knowledge_updater import record_learning
 from utils.tools import AVAILABLE_TOOLS
 from utils.memory import global_memory
 from utils.mcp_client import global_mcp_manager
+from core.observability import TokenUsageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +343,7 @@ class Worker:
             })
 
         # ── Tool Use Loop (Re-act) ───────────────────────────
+        tracker = TokenUsageTracker(agent_name=self.model)
         for step in range(MAX_TOOL_STEPS):
             try:
                 response = await self.client.chat.completions.create(
@@ -352,6 +354,13 @@ class Worker:
                     tools=self.tool_schemas,  # 동적 도구 포함
                     tool_choice="auto",
                 )
+                
+                # 수동 토큰 트래킹 파싱
+                if hasattr(response, "usage") and response.usage:
+                    prompt_info = getattr(response.usage, "prompt_tokens", 0)
+                    completion_info = getattr(response.usage, "completion_tokens", 0)
+                    mock_res = type('Result', (), {'llm_output': {'token_usage': {'prompt_tokens': prompt_info, 'completion_tokens': completion_info}, 'model_name': self.model}})()
+                    tracker.on_llm_end(mock_res)
                 
                 msg = response.choices[0].message
                 content = msg.content or ""

@@ -1,6 +1,7 @@
-# Agentic Flow: Mac Mini M4 Hybrid AI Orchestration
+# Agentic Flow: Enterprise Hybrid AI Orchestration (V4)
 
-**Agentic Flow**는 Mac Mini (Apple Silicon M4) 환경에 최적화된 하이브리드 AI 오케스트레이션 시스템입니다. 로컬 LLM의 빠른 속도와 클라우드 모델의 강력한 추론 능력을 결합하여 효율적인 에이전트 워크플로우를 제공합니다.
+**Agentic Flow**는 Mac Mini (Apple Silicon M4) 환경에 최적화된 하이브리드 AI 오케스트레이션 시스템입니다. 
+V4 업데이트를 통해 **LangGraph 상태 관리, Human-in-the-Loop(HITL), Next.js 기반 Generative UI, 그리고 보안/Docker 배포 아키텍처**를 전면 도입했습니다.
 
 ## 🚀 Key Features
 
@@ -36,17 +37,21 @@
 *   **📜 SOUL/MEMORY Integration**: OpenClaw의 `SOUL.md`에서 에이전트 성격/말투/원칙을 파싱하여 시스템 프롬프트에 주입합니다. `MEMORY.md`로 장기 기억을 관리하고 키워드 검색을 지원합니다.
 *   **🔌 Gateway Approval Bridge**: HITL 승인 채널을 추상화하여 CLI, WebSocket, HTTP 등 다양한 승인 경로를 지원합니다. 타임아웃 기반 자동 거절 기능을 포함합니다.
 
-### 🍎 M4 Deep Integration (v4)
+### 🍎 M4 Deep Integration (v3)
 
 *   **🔗 MCP Server (`server.py`)**: FastMCP 기반 상주형 서버. OpenClaw가 표준 프로토콜로 에이전트를 호출합니다. 서버 시작 시 모델 warm-up으로 콜드 스타트를 제거합니다.
 *   **⚡ MLX Inference Engine**: Apple Silicon GPU 직접 활용. PyTorch/CUDA 없이 M4 10-core GPU 100% 활용합니다.
-    *   **RAM Tiering**: 16GB(Edge), 32GB(Standard), 64GB(Workstation), 128GB(Enterprise) 자동 감지
-    *   **Speculative Decoding**: 64GB+ 환경에서 70B 모델 가속 (드래프트 모델 활용)
-    *   **In-Memory RAG**: 128GB 환경에서 벡터 인덱스를 RAM에 캐싱하여 초고속 검색
-    *   MLX 미설치 시 LiteLLM 자동 fallback
-*   **🔍 Hardware Probe**: Apple Silicon 칩 자동 감지 (M4/M4 Pro/M4 Max/M4 Ultra), 실시간 메모리 압박 모니터링.
-*   **🎹 Auto-Tune Skill**: `scripts/autotune.py`로 HuggingFace의 최신 MLX 모델을 탐색하고 시스템에 맞는 최적 설정을 자동 적용합니다.
-*   **📦 One-Click Setup**: `setup_m4.sh`로 환경 설치, MLX/의존성 설치, 메모리 용량별 sysctl 튜닝 자동화.
+*   **RAM Tiering**: 16GB(Edge), 32GB(Standard), 64GB(Workstation), 128GB(Enterprise) 다이내믹 로딩
+*   **🎹 Auto-Tune Skill**: `scripts/autotune.py`로 시스템에 맞는 최적 설정을 자동 적용합니다.
+
+### 🌊 Enterprise Flow & Generative UI (v4 - 🚀 NEW)
+
+*   **🔀 LangGraph Orchestration**: 기존 비동기 큐 로직을 벗어나 `StateGraph` 기반의 신뢰성 높은 그래프 워크플로우를 구축했습니다. `AsyncPostgresSaver`를 통한 완벽한 영속성(Persistence)과 무한 타임트래블(Time-Travel) 기능을 제공합니다.
+*   **⏸️ Human-in-the-Loop (HITL) 2.0**: 결제, 보안 등 고위험 노드에서 실행을 멈추고(`interrupt_before`), 운영자가 개입하여 파라미터를 수정(`aupdate_state`)하거나 거부할 수 있습니다.
+*   **🛑 Global Halt Control**: 무한 루프나 폭주를 막기 위해 Redis Pub/Sub을 활용한 실시간 강제 종료 데몬(`HaltManager`)을 탑재했습니다.
+*   **📊 Observability & Cost Tracking**: OpenTelemetry + Prometheus 엔드포인트를 노출하여 실시간 애플리케이션 지표를 수집하며, LangSmith를 통합해 토큰 사용량과 예상 비용을 정산합니다.
+*   **✨ Generative UI (Next.js & CopilotKit)**: 칙칙한 콘솔 로그를 버리고, `TailwindCSS`와 `shadcn/ui` 기반의 수려한 React 프론트엔드를 도입했습니다. `CopilotKit`을 통해 에이전트 상태를 실시간 연동하고 AI Assistant와 대화할 수 있는 대시보드를 제공합니다.
+*   **🔐 Security & Deployment**: JWT 인증 기반 API 설계, `slowapi` 속도 제한(Rate Limiting), 역할 기반 인가(RBAC) 등 프로덕션 레벨 보안을 구축했습니다. 전체 스택은 `docker-compose` 하나로 완벽히 배포됩니다.
 
 ## 🏗️ Architecture
 
@@ -228,6 +233,24 @@ main.py의 보안 감사를 수행해줘
 
 ```
 agentic_flow/
+├── api/                        # FastAPI 엔드포인트 계층 (v4)
+│   └── server.py               #   LangGraph 트리거, HITL, JWT 인증 및 프로메테우스 메트릭
+├── core/                       # 코어 인프라 계층
+│   ├── graph.py                #   LangGraph StateGraph 파이프라인 (v4)
+│   ├── auth.py                 #   JWT Middleware & RBAC (v4)
+│   ├── observability.py        #   Token Tracking & 비용 산출 (v4)
+│   ├── redis_events.py         #   Pub/Sub 기반 HaltManager (v4)
+│   ├── state.py                #   Pydantic AgentState 
+│   ├── checkpoint.py           #   SQLite 체크포인트 (Legacy)
+│   ├── config_loader.py        #   계층적 YAML 설정 + Jinja2
+│   ├── sandbox.py              #   보안 샌드박스 (경로/명령어 검증)
+│   └── engine_mlx.py           #   MLX 추론 엔진
+├── frontend/                   # 🆕 Next.js Generative UI (v4)
+│   ├── src/app/                #   CopilotKit 통합 라우터 및 대시보드
+│   ├── src/components/         #   HITLApproval UI 및 shadcn 컴포넌트
+│   └── Dockerfile              #   Next.js Standalone 빌드 설정
+├── docker-compose.yml          # 🆕 V4 통합 오케스트레이션 (Postgres, Redis, API, UI)
+├── Dockerfile.api              # 🆕 FastAPI 백엔드 이미지
 ├── core/                       # 코어 인프라 계층
 │   ├── state.py                #   Pydantic v2 AgentState (직렬화/체크포인팅)
 │   ├── checkpoint.py           #   SQLite 체크포인트 저장/롤백
