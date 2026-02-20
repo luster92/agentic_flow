@@ -353,3 +353,44 @@ class DebateLoop:
             lines.append("")
 
         return "\n".join(lines)
+
+
+class AlternativeExplorer:
+    """단일 솔루션을 제시하기 전, 대안 탐색을 유도하여 비판적 사고를 강제합니다."""
+    
+    def __init__(self, base_url: str = "http://localhost:4000", model: str = "local-worker"):
+        self._client = AsyncOpenAI(base_url=base_url, api_key="not-needed")
+        self._model = model
+
+    async def generate_alternatives(self, task: str, primary_plan: str) -> str:
+        """주어진 계획에 대한 3가지 형태의 대안을 모색합니다."""
+        
+        system_msg = (
+            "You are an expert software architect. Instead of accepting the first solution, "
+            "you must critically analyze it and provide exactly 3 alternative approaches to solve the problem.\n"
+            "Each alternative should focus on a different optimization (e.g., Performance, Readability, Security)."
+        )
+        
+        user_msg = (
+            f"Original Task: {task}\n\n"
+            f"Primary Plan:\n{primary_plan}\n\n"
+            "Analyze the above plan. What is missing? What are potential security vulnerabilities? "
+            "Provide 3 distinct alternative approaches to solve the same problem."
+        )
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": user_msg}
+                ],
+                temperature=0.7,
+                max_tokens=2048,
+            )
+            result = response.choices[0].message.content or "Alternative generation failed."
+            logger.info("🧭 Alternative alternatives generated successfully.")
+            return result
+        except Exception as e:
+            logger.error(f"❌ AlternativeExplorer failed: {e}")
+            return f"Alternative generation error: {e}"

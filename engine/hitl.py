@@ -89,6 +89,23 @@ class HITLManager:
     def __init__(self, checkpoint_manager: CheckpointManager) -> None:
         self._checkpoint = checkpoint_manager
         self._pending_approvals: dict[str, dict[str, Any]] = {}
+        
+    def evaluate_complexity(self, task: str, modified_files_count: int = 0) -> int:
+        """작업 텍스트 길이와 수정 파일 수를 기반으로 휴리스틱 복잡도를 계산합니다. (0-100)"""
+        score = 0
+        if len(task) > 500:
+            score += 30
+        elif len(task) > 200:
+            score += 15
+            
+        score += min(50, modified_files_count * 10)
+        
+        # Keywords indicating high complexity/risk
+        high_risk_words = ["architecture", "refactor", "security", "database", "migration", "auth"]
+        if any(w in task.lower() for w in high_risk_words):
+            score += 30
+            
+        return min(100, score)
 
     async def suspend(
         self,

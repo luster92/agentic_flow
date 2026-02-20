@@ -97,6 +97,7 @@ class AgentState(BaseModel):
 
     # ── 실행 포인터 ───────────────────────────────────────
     execution_pointer: str = ""
+    task_queue: list[dict[str, Any]] = Field(default_factory=list)
 
     # ── 스냅샷 메타데이터 ─────────────────────────────────
     metadata: SnapshotMetadata = Field(default_factory=SnapshotMetadata)
@@ -130,6 +131,16 @@ class AgentState(BaseModel):
     def increment_step(self) -> None:
         """실행 단계를 증가시킵니다."""
         self.step += 1
+
+    def enqueue_tasks(self, tasks: list[dict[str, Any]]) -> None:
+        """서브 태스크를 큐에 추가합니다."""
+        self.task_queue.extend(tasks)
+
+    def dequeue_task(self) -> dict[str, Any] | None:
+        """다음 서브 태스크를 가져옵니다."""
+        if self.task_queue:
+            return self.task_queue.pop(0)
+        return None
 
     def to_handoff_context(self) -> dict[str, Any]:
         """에이전트 간 핸드오프 시 전달할 최소 컨텍스트."""

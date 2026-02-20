@@ -57,6 +57,17 @@ from utils.history_manager import HistoryManager, DEFAULT_HISTORY_DIR
 from utils.mcp_client import global_mcp_manager
 from utils.semantic_cache import SemanticCache
 from core.observability import TokenUsageTracker
+from core.planner import TaskPlanner
+from core.context_manager import ContextMonitor
+from core.handoff import HandoffManager
+from engine.terminal import TerminalEngine
+from core.rewind_manager import RewindManager
+from core.rule_injector import RuleInjector
+from engine.adversarial import AlternativeExplorer
+from engine.sandbox import SandboxManager
+from engine.tmux_integration import TmuxIntegration
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
 
 # ── 환경 설정 ─────────────────────────────────────────────────
 load_dotenv()
@@ -117,6 +128,12 @@ async def call_cloud_pm(
             "in software design, complex reasoning, and strategic planning. "
             "Provide thorough, well-structured solutions."
         )
+
+    # Inject Meta-Governance Rules
+    rule_injector = RuleInjector(os.getcwd())
+    rules = rule_injector.get_injected_rules()
+    if rules:
+        system_content += rules
 
     messages = [{"role": "system", "content": system_content}]
 
@@ -188,12 +205,18 @@ async def process_request(
     hitl_mgr: HITLManager | None = None,
     enterprise_config: dict | None = None,
     event_bus: EventBus | None = None,
+    plan_mode: bool = False,
 ) -> str:
     """사용자 요청 처리 파이프라인 (Enterprise Edition)"""
     ecfg = enterprise_config or {}
     history.add_message("user", user_input)
     state.increment_turn()
     state.increment_step()
+
+    if plan_mode:
+        system_msg = "[PLAN MODE ACTIVE: Do not modify files. Analyze and propose a plan only.]"
+        history.add_message("system", system_msg)
+        logger.info("🔍 System in PLAN MODE. Tools should be mocked or restricted.")
 
     # ── 0단계: Semantic Cache Lookup (Short-Circuit) ──────
     if cache:
@@ -247,6 +270,19 @@ async def process_request(
     # ── 2단계: 라우팅에 따라 실행 ────────────────────────────
     context = history.get_context()
     state.conversation_history = context
+    
+    # ── HITL ──────────────────────────────────────────────────
+    if hitl_mgr:
+        complexity_score = hitl_mgr.evaluate_complexity(user_input)
+        if complexity_score >= 50:
+            logger.info(f"⚠️ High complexity task detected (score: {complexity_score}).")
+            if ecfg.get("hitl_enabled", True):
+                if state.status != SessionStatus.SUSPENDED:
+                    raise WaitApproval(
+                        reason=f"High complexity task requires human review (score: {complexity_score})",
+                        function_name="process_request",
+                        function_args={"user_input": user_input[:100]}
+                    )
 
     if destination == "CLOUD":
         logger.info(f"☁️  [Cloud PM: {CLOUD_MODEL_NAME}] 고난도 작업 처리 중...")
@@ -262,6 +298,18 @@ async def process_request(
                 "persona": persona_mgr.current_id if persona_mgr else "default",
             },
         )
+        
+        # ── Alternative Exploration ──
+        explorer = AlternativeExplorer(base_url=LITELLM_BASE_URL, model=CLOUD_MODEL_NAME)
+        alt_response = await explorer.generate_alternatives(user_input, final_response)
+        
+        history.add_message(
+            "assistant", 
+            f"💡 **Alternatives Explored:**\n{alt_response}",
+            metadata={"handler": "alternative-explorer", "streamed": False}
+        )
+        final_response += f"\n\n💡 **Alternatives Explored:**\n{alt_response}"
+        
     else:
         logger.info("🔨 [Worker] 작업 실행 중...")
         result = await worker.execute(user_input, context=context)
@@ -457,9 +505,30 @@ async def main() -> None:
     )
     hitl_mgr = HITLManager(checkpoint_manager=checkpoint_mgr)
 
-    # 이벤트 버스 초기화
+    # EventBus initialization
     event_bus = EventBus()
     await event_bus.start()
+
+    planner = TaskPlanner(base_url=LITELLM_BASE_URL)
+    context_monitor = ContextMonitor(max_turns=20)
+    handoff_mgr = HandoffManager(HISTORY_DIR)
+    rewind_manager = RewindManager(os.getcwd())
+    sandbox_mgr = SandboxManager()
+    
+    # Provision Sandbox for this session
+    await sandbox_mgr.provision_container(state.session_id)
+    # Provision Tmux Session
+    await TmuxIntegration.create_session(f"test-{state.session_id}")
+
+    # Check for existing HANDOFF.md on startup
+    existing_handoff = handoff_mgr.load_handoff()
+    if existing_handoff:
+        logger.info("📄 Found HANDOFF.md! Resuming context from previous session.")
+        initial_summary = existing_handoff.current_goal
+        # Can inject the previous progress/next steps into the first prompt context
+        history.add_message("system", f"Resumed Session via HANDOFF.md.\nGoal: {initial_summary}\nProgress: {existing_handoff.progress}\nNext: {existing_handoff.next_steps}")
+    else:
+        initial_summary = ""
 
     # 세션 시작 이벤트 발행
     await event_bus.publish(Event(
@@ -475,6 +544,23 @@ async def main() -> None:
     # 마지막 응답 추적 (적대적 검증용)
     last_response: str = ""
 
+    plan_mode_active = [False]
+    bindings = KeyBindings()
+
+    @bindings.add('escape', 'escape')
+    def rewind_last(event):
+        success = rewind_manager.rewind_last()
+        status = "✅ Reverted" if success else "⚠️ Nothing to revert"
+        print(f"\n⏪ [Rewind] {status}!")
+
+    @bindings.add('escape', 'tab')
+    def toggle_plan_mode(event):
+        plan_mode_active[0] = not plan_mode_active[0]
+        status = "ON" if plan_mode_active[0] else "OFF"
+        print(f"\n🔍 [Plan Mode] {status}")
+
+    prompt_session = PromptSession(key_bindings=bindings)
+
     logger.info("✅ 시스템 초기화 완료 (Enterprise Edition)")
     logger.info(f"📡 LiteLLM Proxy: {LITELLM_BASE_URL}")
     logger.info(f"📡 EventBus: running ({event_bus.subscription_count} subscribers)")
@@ -485,18 +571,41 @@ async def main() -> None:
         while True:
             try:
                 persona_label = persona_mgr.current_id
+                pm_status = "💡 PLAN" if plan_mode_active[0] else "⚡ EXEC"
                 prompt_text = (
                     f"\n[{history.project_name} | "
                     f"{CLOUD_MODEL_NAME.split('-')[-1]} | "
-                    f"🎭 {persona_label}] 🧑 You > "
+                    f"🎭 {persona_label} | {pm_status}] 🧑 You > "
                 )
-                user_input = await asyncio.to_thread(input, prompt_text)
+                user_input = await prompt_session.prompt_async(prompt_text)
                 user_input = user_input.strip()
             except EOFError:
                 print("\n👋 종료합니다.")
                 break
 
             if not user_input:
+                continue
+
+            # ── Immediate Terminal Execution ──────────────────────
+            if user_input.startswith("!"):
+                # To protect host loop, execute dangerous commands in safeclaw Sandbox.
+                output = await sandbox_mgr.execute_in_sandbox(state.session_id, user_input[1:])
+                print(f"\n💻 [Safeclaw Sandbox Output] >\n{output}")
+                history.add_message("user", f"Ran terminal command in sandbox: {user_input}")
+                history.add_message("system", f"\nCommand output:\n{output}", metadata={"handler": "sandbox", "streamed": False})
+                continue
+
+            # ── Autonomous Verification Test (tmux) ────────────────
+            if user_input.startswith("/test "):
+                test_cmd = user_input[6:].strip()
+                tmux_session = f"test-{state.session_id}"
+                print(f"🧪 Running autonomous test in background tmux session '{tmux_session}': {test_cmd}")
+                await TmuxIntegration.run_test(tmux_session, test_cmd)
+                await asyncio.sleep(2) # Give it brief time to execute
+                output = await TmuxIntegration.get_test_output(tmux_session)
+                print(f"📸 [Tmux Capture Output] >\n{output}")
+                history.add_message("user", f"Verified via tmux test loop: {test_cmd}")
+                history.add_message("system", f"Test Results:\n{output}", metadata={"handler": "tmux-test", "streamed": False})
                 continue
 
             # ── CLI 명령어 처리 ──────────────────────────────────
@@ -546,6 +655,13 @@ async def main() -> None:
                     print(f"   세션 ID: {state.session_id[:8]}...")
                     print(f"   단계: {state.step}")
                     print(f"   상태: {state.status.value}")
+                    print(f"   Plan Mode: {'ON' if plan_mode_active[0] else 'OFF'}")
+                    continue
+
+                elif cmd == "/context":
+                    mcp_tools = config.get("mcp_servers", {})
+                    stats = TerminalEngine.get_context_profiler_stats(history.get_full_history(), mcp_tools)
+                    print(stats)
                     continue
 
                 elif cmd == "/new":
@@ -695,25 +811,72 @@ async def main() -> None:
 
             # ── 일반 처리 ────────────────────────────────────────
             try:
-                response = await process_request(
-                    user_input, router, worker, history, state, cache,
-                    checkpoint_mgr=checkpoint_mgr,
-                    persona_mgr=persona_mgr,
-                    debate_loop=debate_loop,
-                    hitl_mgr=hitl_mgr,
-                    enterprise_config=enterprise_config,
-                    event_bus=event_bus,
-                )
-                last_response = response
-
-                if not response.startswith("[ERROR]"):
-                    last_msgs = history.get_full_history()[-1:]
-                    streamed = any(
-                        (m.get("metadata") or {}).get("streamed")
-                        for m in last_msgs
+                # Task Planner Integration (Phase 1)
+                # If there are no pending tasks and input doesn't start with /
+                if not state.task_queue and not user_input.startswith("/"):
+                    print("🧠 작업 계획 분석 중...")
+                    plan = await planner.create_plan(user_input)
+                    if plan and plan.tasks:
+                        print(f"📋 작업을 {len(plan.tasks)}개의 단계로 분할했습니다.")
+                        for t in plan.tasks:
+                            print(f"   - {t.description}")
+                        state.enqueue_tasks([{"id": t.id, "desc": t.description} for t in plan.tasks])
+                        
+                while True:
+                    if state.task_queue:
+                        current_task = state.task_queue[0]
+                        prompt_to_process = f"Sub-task [{current_task['id']}]: {current_task['desc']}\n\nContext based on original request:\n{user_input}"
+                        print(f"\n▶️ 실행 중인 단계: {current_task['desc']}")
+                    else:
+                        prompt_to_process = user_input
+                        
+                    response = await process_request(
+                        prompt_to_process, router, worker, history, state, cache,
+                        checkpoint_mgr=checkpoint_mgr,
+                        persona_mgr=persona_mgr,
+                        debate_loop=debate_loop,
+                        hitl_mgr=hitl_mgr,
+                        enterprise_config=enterprise_config,
+                        event_bus=event_bus,
+                        plan_mode=plan_mode_active[0]
                     )
-                    if not streamed:
-                        print(f"\n🤖 Assistant > {response}")
+                    last_response = response
+
+                    if not response.startswith("[ERROR]"):
+                        last_msgs = history.get_full_history()[-1:]
+                        streamed = any(
+                            (m.get("metadata") or {}).get("streamed")
+                            for m in last_msgs
+                        )
+                        if not streamed:
+                            print(f"\n🤖 Assistant > {response}")
+                            
+                    if state.task_queue:
+                        state.dequeue_task()
+                        if not state.task_queue:
+                            print("\n✅ 모든 서브 태스크가 완료되었습니다.")
+                            break
+                    else:
+                        break
+
+                # Phase 2: Context Lifecycle Monitor
+                if context_monitor.should_spawn_new_session(state):
+                    print("⚠️ 컨텍스트 임계치 도달. 세션을 분리합니다...")
+                    project_dir = os.path.join(HISTORY_DIR, history.project_name)
+                    if not os.path.exists(project_dir):
+                        os.makedirs(project_dir)
+                    
+                    state = await context_monitor.execute_handoff(
+                        state=state,
+                        history=history,
+                        project_dir=project_dir
+                    )
+                    history = HistoryManager(
+                        project_name=history.project_name,
+                        base_dir=HISTORY_DIR,
+                        context_window=CONTEXT_WINDOW,
+                    )
+                    print("✨ 새로운 세션이 시작되었습니다 (HANDOFF.md 생성 완료).")
 
             except WaitApproval as e:
                 # HITL 인터럽트 처리
@@ -729,6 +892,14 @@ async def main() -> None:
     except KeyboardInterrupt:
         print("\n👋 종료합니다.")
     finally:
+        # Tear down sandbox & tmux
+        try:
+            sandbox_mgr = SandboxManager()
+            await sandbox_mgr.teardown_container(state.session_id)
+            await TmuxIntegration.kill_session(f"test-{state.session_id}")
+        except Exception:
+            pass
+
         # 세션 종료 이벤트 발행
         try:
             await event_bus.publish(Event(

@@ -53,6 +53,15 @@ V4 업데이트를 통해 **LangGraph 상태 관리, Human-in-the-Loop(HITL), Ne
 *   **✨ Generative UI (Next.js & CopilotKit)**: 칙칙한 콘솔 로그를 버리고, `TailwindCSS`와 `shadcn/ui` 기반의 수려한 React 프론트엔드를 도입했습니다. `CopilotKit`을 통해 에이전트 상태를 실시간 연동하고 AI Assistant와 대화할 수 있는 대시보드를 제공합니다.
 *   **🔐 Security & Deployment**: JWT 인증 기반 API 설계, `slowapi` 속도 제한(Rate Limiting), 역할 기반 인가(RBAC) 등 프로덕션 레벨 보안을 구축했습니다. 전체 스택은 `docker-compose` 하나로 완벽히 배포됩니다.
 
+### 🧠 Claude Code Paradigm (V5 - 🚀 NEW)
+
+*   **🧩 Task Decomposition & DAG Pipeline**: 고도화된 `TaskPlanner`를 통해 복잡한 프롬프트를 방향성 비순환 그래프(DAG) 형태의 하위 작업으로 자동 분해하여 순차 실행합니다.
+*   **🔄 Context Lifecycle & Handoff**: `ContextMonitor`가 컨텍스트 열화(Context Rot)를 감지하면 `HANDOFF.md`를 자동 생성하고 새로운 세션을 스폰하여 안정적인 장기 기억을 유지합니다.
+*   **💻 Enterprise Terminal & Input Engine**: `prompt_toolkit` 기반으로 터미널을 개편했습니다. `!` 접두어로 빠른 로컬 명령어 실행, `Shift+Tab`을 통한 Plan Mode 토글, `Esc` 입력을 통한 즉시 Rewind(실행 취소/스냅샷 롤백)를 지원합니다.
+*   **⚖️ Meta-Governance & Intent Injection**: `CLAUDE.md` 등 규칙 파일을 파싱하여 "의도(Intent)"를 프롬프트에 자동 주입하며, 복잡도 기반 평가(`evaluate_complexity`)를 통해 고위험 작업 시 인간의 승인을 요구하는 강력한 제어망을 구축했습니다.
+*   **🛡️ Autonomous Verification Sandbox**: 위험한 명령어는 격리된 `Safeclaw` (Docker 샌드박스)에서 실행되며, 백그라운드 `tmux` 세션을 활용해 자율 Write-Test 루프를 수행하고 그 결과를 LLM 컨텍스트에 캡처합니다.
+*   **🧭 Alternative Exploration**: 실행 전 `AlternativeExplorer`가 비판적 사고를 강제하여 성능, 보안, 가독성을 최적화한 3가지 대안을 추가로 모색합니다.
+
 ## 🏗️ Architecture
 
 ```
