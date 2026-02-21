@@ -230,7 +230,103 @@ class HistoryManager:
         except Exception as e:
             logger.error(f"❌ 마이그레이션 실패: {e}")
 
-    # ── Semantic Context Filtering ─────────────────────────────────
+    # ── Semantic Context Filtering & Compression ────────────────────
+
+    async def compress_old_memories(
+        self,
+        threshold_msgs: int = 40,
+        compress_count: int = 20,
+        base_url: str = "http://localhost:4000"
+    ) -> bool:
+        """
+        오래된 메시지가 특정 개수(threshold_msgs)를 초과하면, 가장 오래된 N개(compress_count)를
+        Dense English (의미론적 축약 언어)로 압축하여 단일 블록으로 치환합니다.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE project_id = ?",
+                (self.project_id,)
+            )
+            total = cursor.fetchone()[0]
+            
+        if total <= threshold_msgs:
+            return False
+            
+        with sqlite3.connect(self.db_path) as conn:
+            # 보존할 시스템 프롬프트(최상단) 등은 정책에 따라 다를 수 있으나,
+            # 여기서는 단순히 시간순으로 가장 오래된 일반 대화/도구 결과를 가져옵니다.
+            cursor = conn.execute(
+                "SELECT id, role, content, timestamp FROM messages WHERE project_id = ? ORDER BY id ASC LIMIT ?",
+                (self.project_id, compress_count)
+            )
+            rows = cursor.fetchall()
+            
+        if not rows:
+            return False
+            
+        # 1. 텍스트 직렬화
+        text_to_compress = []
+        for r in rows:
+            text_to_compress.append(f"[{r[1]}] {r[2]}")
+        conversation_text = "\\n".join(text_to_compress)
+        
+        # 2. LLM 호출 (로컬 경량 모델)
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(base_url=base_url, api_key="not-needed")
+        
+        system_prompt = (
+            "You are a semantic memory compressor. "
+            "Compress the following conversation log into extremely dense English shorthand. "
+            "Focus only on facts, decisions, context, and constraints. "
+            "Omit all conversational filler, grammar, and polite words. "
+            "Use dense formats like 'req:auth|db:ok|err:timeout'. Do NOT use full sentences. "
+            "Maximize token efficiency while preserving factual integrity."
+        )
+        
+        try:
+            response = await client.chat.completions.create(
+                model="local-helper",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": conversation_text},
+                ],
+                temperature=0.1,
+                max_tokens=1024,
+            )
+            compressed_result = response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"❌ 메모리 압축 실패: {e}")
+            return False
+            
+        if not compressed_result:
+            return False
+            
+        final_content = f"[COMPRESSED_MEMORY]\\n{compressed_result}"
+        # 가장 최근 압축 메시지의 timestamp를 사용해 정렬 유지
+        last_timestamp = rows[-1][3]
+        ids_to_delete = [r[0] for r in rows]
+        
+        # 3. DB 교체 트랜잭션 (원래 순서를 유지하기 위해 첫 번째 행을 재활용)
+        with sqlite3.connect(self.db_path) as conn:
+            keep_id = ids_to_delete[0]
+            delete_ids = ids_to_delete[1:]
+            
+            # 첫 번째 메시지를 압축 블록으로 업데이트
+            conn.execute(
+                "UPDATE messages SET role = ?, content = ?, timestamp = ?, metadata = ? WHERE id = ?",
+                ("system", final_content, last_timestamp, None, keep_id)
+            )
+            
+            # 나머지 병합된 메시지 삭제
+            if delete_ids:
+                placeholders = ",".join(["?"] * len(delete_ids))
+                conn.execute(
+                    f"DELETE FROM messages WHERE id IN ({placeholders})",
+                    delete_ids
+                )
+            
+        logger.info(f"🗜️ 과거 메시지 {len(ids_to_delete)}개를 1개의 의미론적 압축(Dense) 블록으로 치환했습니다.")
+        return True
 
     def get_summarized_context(self, max_recent: int = 3) -> dict:
         """핸드오프용 요약 컨텍스트를 반환합니다.

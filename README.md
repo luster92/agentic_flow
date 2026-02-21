@@ -70,6 +70,10 @@ V4 업데이트를 통해 **LangGraph 상태 관리, Human-in-the-Loop(HITL), Ne
 *   **📌 Zero-Day Dependency Pinning**: `mcp`, `pydantic`, `langgraph` 등 코어 라이브러리에 대해 PyPI API를 탐색해 2026년 기준 가장 강력한 안정화 최신 버전으로 100% 고정(`==`)했습니다.
 *   **✂️ Architectural Code Pruning**: 사용되지 않던 Mock 노드(결제/영업/티어별 지원 등)를 삭제하고 `Router` 패스를 `Worker`로 직결해 워크플로우를 대폭 경량화했습니다.
 
+### 🧠 Deep Memory Optimization (V5.2 - 🚀 NEW)
+
+*   **🗜️ Semantic Memory Compression (Context Pruning)**: 긴 대화로 인한 Context Rot 방지 및 토큰 오버플로우를 막기 위해, 임계치 초과 시 과거 기억을 백그라운드에서 **`Dense English Shorthand`** (기계-중심적 축약어, e.g. `req:auth|db:ok`)로 자동 압축하여 시계열 데이터(SQLite)에 병합합니다.
+
 ## 🏗️ Architecture
 
 ```

@@ -421,6 +421,15 @@ async def process_request(
             },
         ))
 
+    # ── 메모리 자동 압축 (Fire and Forget) ────────────────────
+    asyncio.create_task(
+        history.compress_old_memories(
+            threshold_msgs=40,
+            compress_count=20,
+            base_url=LITELLM_BASE_URL
+        )
+    )
+
     return final_response
 
 
