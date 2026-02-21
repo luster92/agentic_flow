@@ -55,6 +55,33 @@ async def startup_event():
         max_size=20,
         kwargs={"autocommit": True}
     )
+    
+    # Init DB and seed admin user if not exists
+    async with pg_pool.connection() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL DEFAULT 'operator'
+            )
+        """)
+        # Seed default admin if user table is empty
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT COUNT(*) FROM users")
+            count = (await cur.fetchone())[0]
+            if count == 0:
+                admin_hash = get_password_hash("admin123")
+                operator_hash = get_password_hash("operator123")
+                await cur.executemany(
+                    "INSERT INTO users (username, password, role) VALUES (%s, %s, %s)",
+                    [
+                        ("admin", admin_hash, "admin"),
+                        ("operator", operator_hash, "operator")
+                    ]
+                )
+                logging.getLogger("api").info("Seeded default users: admin, operator")
+
     await halt_manager.connect()
     
 @app.on_event("shutdown")
@@ -68,20 +95,21 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
-# Mock User DB (Replace with PostgreSQL in Production)
-MOCK_USERS = {
-    "admin": {"password": get_password_hash("admin123"), "role": "admin"},
-    "operator": {"password": get_password_hash("operator123"), "role": "operator"},
-}
-
 @app.post("/api/v1/auth/login")
 @limiter.limit("5/minute")
 async def login(request: Request, login_data: LoginRequest):
-    user = MOCK_USERS.get(login_data.username)
-    if not user or not verify_password(login_data.password, user["password"]):
+    async with pg_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT password, role FROM users WHERE username = %s",
+                (login_data.username,)
+            )
+            user_record = await cur.fetchone()
+            
+    if not user_record or not verify_password(login_data.password, user_record[0]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
-    token = create_access_token(data={"sub": login_data.username, "role": user["role"]})
+    token = create_access_token(data={"sub": login_data.username, "role": user_record[1]})
     return {"access_token": token, "token_type": "bearer"}
 
 # ── 1. WebSocket / Pending Status ──
@@ -175,11 +203,11 @@ async def get_current_state(thread_id: str = "default_session"):
         "session_id": thread_id,
         "step": 5,
         "status": "SUSPENDED",
-        "current_agent": "billing",
+        "current_agent": "worker",
         "active_persona": "Senior Architect",
         "hitl_context": {
-            "reason": "결제 승인 대기 중 (인터럽트)",
+            "reason": "작업 승인 대기 중 (인터럽트)",
             "suspended_at": "2026-02-20T12:00:00Z",
-            "args": {"amount": 50000, "currency": "KRW"}
+            "args": {"action": "execute_code"}
         }
     }

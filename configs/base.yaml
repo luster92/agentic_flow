@@ -31,22 +31,17 @@ logging:
   format: "%(asctime)s │ %(levelname)-7s │ %(name)-20s │ %(message)s"
   structured_events: true              # Phase 4: 구조화 이벤트 출력
 
-# ── 보안 (Phase 2) ───────────────────────────────────────────
+# ── 보안 (Phase 2 & 5) ───────────────────────────────────────────
 security:
   sandbox_enabled: true
-  allowed_read_paths:
-    - "."                              # 작업 디렉토리
-    - "~/.openclaw/"                   # OpenClaw 메모리
-  allowed_write_paths:
-    - "./output/"
-  blocked_commands:
-    - "rm -rf"
-    - "shutdown"
-    - "reboot"
-    - "mkfs"
-    - "dd if="
-    - "chmod -R 777"
-  max_execution_time: 30
+  sandbox_type: "docker"               # Changed from blacklist to actual Docker container (Safeclaw)
+  docker_base_image: "python:3.11-slim"
+  network_mode: "bridge"               # "none" for strict isolation, "bridge" for external API access
+  allowed_mount_paths:
+    - host_path: "./output/"
+      container_path: "/workspace/output"
+      mode: "rw"
+  max_execution_time_sec: 30
   max_memory_mb: 512
 
 # ── 모델 티어링 (Phase 3) ────────────────────────────────────

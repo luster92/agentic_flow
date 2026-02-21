@@ -62,6 +62,14 @@ V4 업데이트를 통해 **LangGraph 상태 관리, Human-in-the-Loop(HITL), Ne
 *   **🛡️ Autonomous Verification Sandbox**: 위험한 명령어는 격리된 `Safeclaw` (Docker 샌드박스)에서 실행되며, 백그라운드 `tmux` 세션을 활용해 자율 Write-Test 루프를 수행하고 그 결과를 LLM 컨텍스트에 캡처합니다.
 *   **🧭 Alternative Exploration**: 실행 전 `AlternativeExplorer`가 비판적 사고를 강제하여 성능, 보안, 가독성을 최적화한 3가지 대안을 추가로 모색합니다.
 
+### 🏰 Production Hardening & Core Unification (V5.1 - 🚀 NEW)
+
+*   **🛡️ Real PostgreSQL Authentication**: `api/server.py`의 Mock 계정을 실제 비동기 DB 쿼리(`asyncpg`)를 활용한 JWT 기반 RBAC 로직으로 전면 교체했습니다.
+*   **🔗 Unified AgentState**: LangGraph의 `TypedDict`와 기존 Pydantic 모델을 결합하여, 그래프 오케스트레이션과 체크포인트 메타데이터 간의 상태 파편화를 완벽히 제거했습니다.
+*   **🔒 Docker Native Sandbox (Safeclaw)**: YAML 블랙리스트 기반 방식을 폐기하고 실제 `SandboxManager`의 브릿지 네트워크 모드와 Volume 마운트 제어 명세로 샌드박스 무결성을 높였습니다.
+*   **📌 Zero-Day Dependency Pinning**: `mcp`, `pydantic`, `langgraph` 등 코어 라이브러리에 대해 PyPI API를 탐색해 2026년 기준 가장 강력한 안정화 최신 버전으로 100% 고정(`==`)했습니다.
+*   **✂️ Architectural Code Pruning**: 사용되지 않던 Mock 노드(결제/영업/티어별 지원 등)를 삭제하고 `Router` 패스를 `Worker`로 직결해 워크플로우를 대폭 경량화했습니다.
+
 ## 🏗️ Architecture
 
 ```
