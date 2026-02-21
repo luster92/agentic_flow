@@ -70,6 +70,8 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 
 # ── 환경 설정 ─────────────────────────────────────────────────
+from utils.key_manager import ensure_api_keys
+ensure_api_keys()  # 자동/수동 API 키 설정 (첫 구동 시)
 load_dotenv()
 
 LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
