@@ -36,7 +36,7 @@ def _get_openclaw_key(model_name: str) -> str | None:
 def _prompt_user_for_key() -> tuple[str, str]:
     """Interactive prompt for the user to select an LLM provider and enter their key."""
     print("\n" + "="*50)
-    print("Welcome to Agentic Flow Enterprise!")
+    print("Welcome to Clawflow Enterprise!")
     print("It looks like you don't have an API key configured in .env.")
     print("Please select your primary LLM provider:")
     print("  [1] OpenAI (GPT-4/o1)")
@@ -92,7 +92,7 @@ def _save_to_env(key_name: str, key_value: str, env_path: str = ".env"):
         # Make sure LITELLM_MASTER_KEY is also set if it's not present
         if not any("LITELLM_MASTER_KEY=" in ln for ln in lines):
             with open(env_path, "a", encoding="utf-8") as f:
-                f.write('LITELLM_MASTER_KEY="sk-agentic-flow-default"\n')
+                f.write('LITELLM_MASTER_KEY="sk-clawflow-default"\n')
                 
     except Exception as e:
         print(f"Failed to write to {env_path}: {e}")

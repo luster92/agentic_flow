@@ -20,7 +20,7 @@ class HaltManager:
     async def connect(self):
         self.redis_client = redis.from_url(self.redis_url)
         self.pubsub = self.redis_client.pubsub()
-        await self.pubsub.subscribe("agentic_flow_halt_events")
+        await self.pubsub.subscribe("clawflow_halt_events")
         logger.info("📡 Redis Pub/Sub connected for Halt events.")
         
         self._listener_task = asyncio.create_task(self._listen())
@@ -43,7 +43,7 @@ class HaltManager:
         if self._listener_task:
             self._listener_task.cancel()
         if self.pubsub:
-            await self.pubsub.unsubscribe("agentic_flow_halt_events")
+            await self.pubsub.unsubscribe("clawflow_halt_events")
             await self.pubsub.close()
         if self.redis_client:
             await self.redis_client.aclose()
@@ -60,7 +60,7 @@ class HaltManager:
         """외부 패널(API)에서 강제 중단을 요청할 때 호출"""
         if self.redis_client:
             payload = json.dumps({"session_id": session_id, "reason": reason})
-            await self.redis_client.publish("agentic_flow_halt_events", payload)
+            await self.redis_client.publish("clawflow_halt_events", payload)
             logger.info(f"📣 Broadcasted HALT for {session_id}")
 
 # 글로벌 인스턴스

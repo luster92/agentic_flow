@@ -1,5 +1,5 @@
 """
-Tests for Phase 1-6 improvements to agentic_flow.
+Tests for Phase 1-6 improvements to clawflow.
 """
 
 import pytest

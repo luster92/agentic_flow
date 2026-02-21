@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_HISTORY_DIR = "history"
 DEFAULT_CONTEXT_WINDOW = 20
-DB_FILENAME = "agentic_flow.db"
+DB_FILENAME = "clawflow.db"
 
 
 class HistoryManager:

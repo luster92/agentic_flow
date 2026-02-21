@@ -87,6 +87,6 @@ args: ["server.py"]
 ## 📦 설치
 
 ```bash
-cd ~/antigravity/agentic_flow
+cd ~/antigravity/clawflow
 bash setup_m4.sh
 ```

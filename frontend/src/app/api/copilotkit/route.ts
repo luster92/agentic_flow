@@ -12,14 +12,14 @@ export async function POST(req: NextRequest) {
 
     // For a simple pass-through, we can use the OpenAIAdapter pointing
     // to LiteLLM, but ideally we want to call our FastAPI Orchestrator.
-    // We'll proxy the latest user message to the agentic_flow FastAPI endpoint.
+    // We'll proxy the latest user message to the clawflow FastAPI endpoint.
 
     const lastUserMessage = messages.filter((m: { role: string; content: string }) => m.role === 'user').pop();
 
     if (lastUserMessage) {
         // Fire and forget the task to the LangGraph backend via a REST API (custom implementation).
         // In a real scenario, this would stream the response back.
-        console.log("Triggering Agentic Flow for:", lastUserMessage.content);
+        console.log("Triggering Clawflow for:", lastUserMessage.content);
     }
 
     const { response } = await runtime.process(

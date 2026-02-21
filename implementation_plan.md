@@ -1,6 +1,6 @@
-# Agentic Flow Architecture Upgrade Plan
+# Clawflow Architecture Upgrade Plan
 
-This plan details the implementation steps to evolve the `agentic_flow` system into a highly observable, human-controlled, and production-ready multi-agent platform. It introduces Human-in-the-Loop (HITL) mechanisms, deep monitoring with OpenTelemetry and Grafana, real-time token tracking, a React-based generative UI, and robust security & deployment strategies based on the provided proposal.
+This plan details the implementation steps to evolve the `clawflow` system into a highly observable, human-controlled, and production-ready multi-agent platform. It introduces Human-in-the-Loop (HITL) mechanisms, deep monitoring with OpenTelemetry and Grafana, real-time token tracking, a React-based generative UI, and robust security & deployment strategies based on the provided proposal.
 
 ## Phase 1: Persistent State & Human-in-the-Loop (HITL)
 Implementation of explicit Pause (approval) and Halt (emergency stop) mechanisms.

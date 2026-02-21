@@ -1,4 +1,4 @@
-# Active Task List: Agentic Flow Architecture Upgrade
+# Active Task List: Clawflow Architecture Upgrade
 
 - [x] Ingest architecture proposal & draft implementation plan (`implementation_plan.md`)
 - [ ] Phase 1: Persistent State & Human-in-the-Loop (HITL)

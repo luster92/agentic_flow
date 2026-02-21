@@ -38,7 +38,7 @@ if [ ! -d "$SKILLS_DIR" ]; then
 fi
 
 # ── 심링크 생성 ───────────────────────────────────────────────
-SKILL_LINK="$SKILLS_DIR/agentic_flow"
+SKILL_LINK="$SKILLS_DIR/clawflow"
 
 if [ -L "$SKILL_LINK" ]; then
     echo -e "  기존 심링크 제거 중..."

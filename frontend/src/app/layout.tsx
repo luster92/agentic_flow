@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Agentic Flow Enterprise",
+  title: "Clawflow Enterprise",
   description: "Advanced GenAI Orchestration with Generative UI",
 };
 
@@ -36,7 +36,7 @@ export default function RootLayout({
             className="fixed bottom-4 right-4 z-50"
             instructions="You are an expert orchestrator assistant."
             labels={{
-              title: "Agentic Flow Assistant",
+              title: "Clawflow Assistant",
               initial: "How can I help you orchestrate today?",
             }}
           />

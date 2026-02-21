@@ -1,6 +1,6 @@
-# Agentic Flow: Enterprise Hybrid AI Orchestration (V5.3)
+# Clawflow: Enterprise Hybrid AI Orchestration (V5.3)
 
-**Agentic Flow**는 Mac Mini (Apple Silicon M4) 환경에 최적화된 하이브리드 AI 오케스트레이션 시스템입니다. 
+**Clawflow**는 Mac Mini (Apple Silicon M4) 환경에 최적화된 하이브리드 AI 오케스트레이션 시스템입니다. 
 V5.3 업데이트를 통해 **Intelligent API Key Discovery, Semantic Memory Compression, LangGraph 상태 관리, Human-in-the-Loop(HITL)** 기능을 완벽히 통합하여 엔터프라이즈 레벨의 프로덕션 안정성을 달성했습니다.
 
 ---
@@ -82,8 +82,8 @@ User Input
 
 1.  **Repository Clone & Env Setup**
     ```bash
-    git clone https://github.com/luster92/agentic_flow.git
-    cd agentic_flow
+    git clone https://github.com/luster92/clawflow.git
+    cd clawflow
     python3 -m venv .venv
     source .venv/bin/activate
     pip install -r requirements.txt
@@ -125,7 +125,7 @@ User Input
 ## 📂 Project Structure
 
 ```text
-agentic_flow/
+clawflow/
 ├── api/                        # FastAPI 엔드포인트 계층 (v5.1 Postgres Auth)
 ├── core/                       # 코어 인프라 계층
 │   ├── graph.py                # LangGraph StateGraph 파이프라인 (Unified State)

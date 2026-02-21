@@ -22,7 +22,7 @@ from psycopg_pool import AsyncConnectionPool
 
 # Setup Rate Limiter
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="Agentic Flow Enterprise HITL API")
+app = FastAPI(title="Clawflow Enterprise HITL API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -51,7 +51,7 @@ async def startup_event():
     global pg_pool
     # Initialize connection pool
     pg_pool = AsyncConnectionPool(
-        conninfo="postgresql://postgres:postgres@localhost:5432/agentic_flow",
+        conninfo="postgresql://postgres:postgres@localhost:5432/clawflow",
         max_size=20,
         kwargs={"autocommit": True}
     )

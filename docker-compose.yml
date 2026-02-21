@@ -4,11 +4,11 @@ services:
   # ── 1. Backend PostgreSQL Database (LangGraph Checkpoints) ──
   postgres:
     image: postgres:15-alpine
-    container_name: agentic_flow_db
+    container_name: clawflow_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-agentic_flow}
+      POSTGRES_DB: ${POSTGRES_DB:-clawflow}
     ports:
       - "5432:5432"
     volumes:
@@ -23,7 +23,7 @@ services:
   # ── 2. Redis Pub/Sub (Halt Events & Rate Limiting) ──
   redis:
     image: redis:7-alpine
-    container_name: agentic_flow_redis
+    container_name: clawflow_redis
     ports:
       - "6379:6379"
     volumes:
@@ -40,7 +40,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: agentic_flow_api
+    container_name: clawflow_api
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,7 +53,7 @@ services:
       - DB_PORT=5432
       - DB_USER=${POSTGRES_USER:-postgres}
       - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - DB_NAME=${POSTGRES_DB:-agentic_flow}
+      - DB_NAME=${POSTGRES_DB:-clawflow}
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-super-secret-key-change-in-prod}
       - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://host.docker.internal:4000}
@@ -67,7 +67,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: agentic_flow_frontend
+    container_name: clawflow_frontend
     depends_on:
       - api
     ports:
