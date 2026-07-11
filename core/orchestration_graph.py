@@ -6,7 +6,7 @@ router, worker, cloud, cache, HITL, persistence, and observability adapters.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -54,7 +54,7 @@ class OrchestrationDependencies:
     cache_put: CachePutter | None = None
     approval_check: ApprovalChecker | None = None
     result_hook: ResultHook | None = None
-    policy: ModelPolicy = ModelPolicy()
+    policy: ModelPolicy = field(default_factory=ModelPolicy)
 
 
 class OrchestrationGraph:
