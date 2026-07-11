@@ -74,7 +74,7 @@ class OrchestrationGraph:
         selection = self.deps.policy.select(decision)
         return {
             "routing": decision.model_dump(mode="json"),
-            "model_alias": selection.model_alias,
+            "model_alias": selection.alias,
             "context": self.deps.context_provider(),
         }
 
