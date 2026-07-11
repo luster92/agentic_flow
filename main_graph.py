@@ -1,8 +1,8 @@
 """Graph-native Clawflow CLI.
 
-This is the migration target for ``main.py``. It runs the same Router, Worker,
-HistoryManager, SemanticCache, checkpoint, HITL, and EventBus components through
-the shared LangGraph orchestration core instead of the procedural
+This is the migration target for ``main.py``. It runs Router, Worker,
+HistoryManager, SemanticCache, checkpoint, HITL, and EventBus through the
+shared LangGraph orchestration core instead of the procedural
 ``process_request`` function.
 """
 
@@ -18,6 +18,7 @@ from openai import AsyncOpenAI
 from agents.router import Router
 from agents.worker import Worker
 from core.checkpoint import CheckpointManager
+from core.config_loader import ConfigLoader
 from core.event_bus import Event, EventBus, EventType
 from core.graph import create_orchestration_graph
 from core.orchestration_graph import OrchestrationDependencies
@@ -25,7 +26,6 @@ from core.routing_schema import RoutingDecision
 from core.state import AgentState, CheckpointType
 from engine.hitl import HITLManager
 from engine.persona import PersonaManager
-from core.config_loader import ConfigLoader
 from utils.history_manager import HistoryManager
 from utils.key_manager import ensure_api_keys
 from utils.semantic_cache import SemanticCache
@@ -61,6 +61,7 @@ class GraphRuntime:
         self.hitl = hitl
         self.persona = persona
         self.events = events
+        self.graph = self._build_graph()
 
     async def cloud_call(
         self,
@@ -101,7 +102,7 @@ class GraphRuntime:
     async def result_hook(self, result: dict) -> None:
         response = result.get("final_response", "")
         routing = result.get("routing", {})
-        alias = result.get("model_alias", "unknown")
+        alias = result.get("model_alias", "semantic-cache")
 
         if response:
             self.history.add_message(
@@ -134,7 +135,7 @@ class GraphRuntime:
             )
         )
 
-    def build_graph(self):
+    def _build_graph(self):
         return create_orchestration_graph(
             OrchestrationDependencies(
                 router=self.router,
@@ -148,11 +149,14 @@ class GraphRuntime:
             )
         )
 
+    def reset(self) -> None:
+        self.history.clear()
+        self.state = AgentState()
+
     async def invoke(self, request: str) -> dict:
         self.history.add_message("user", request)
         self.state.increment_turn()
-        graph = self.build_graph()
-        return await graph.ainvoke({"request": request})
+        return await self.graph.ainvoke({"request": request})
 
 
 async def main() -> None:
@@ -210,8 +214,7 @@ async def main() -> None:
             if request in {"/exit", "/quit"}:
                 break
             if request == "/clear":
-                history.clear()
-                runtime.state = AgentState()
+                runtime.reset()
                 print("Session cleared.")
                 continue
             if request == "/status":
