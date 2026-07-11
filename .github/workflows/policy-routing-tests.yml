@@ -4,15 +4,20 @@ on:
   pull_request:
     paths:
       - "agents/router.py"
+      - "api/graph_adapter.py"
+      - "api/server.py"
       - "core/routing_schema.py"
       - "core/model_policy.py"
       - "core/orchestration_graph.py"
+      - "core/runtime.py"
       - "core/graph.py"
       - "main_graph.py"
       - "tests/test_routing_policy.py"
       - "tests/test_orchestration_graph.py"
       - "tests/test_graph_factory.py"
       - "tests/test_graph_runtime_entrypoint.py"
+      - "tests/test_api_graph_adapter.py"
+      - "tests/test_native_hitl_resume.py"
       - ".github/workflows/policy-routing-tests.yml"
   push:
     branches: [main]
@@ -38,10 +43,12 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
-      - name: Run routing and graph regression tests
+      - name: Run routing, API, and HITL regression tests
         run: |
           pytest -q \
             tests/test_routing_policy.py \
             tests/test_orchestration_graph.py \
             tests/test_graph_factory.py \
-            tests/test_graph_runtime_entrypoint.py
+            tests/test_graph_runtime_entrypoint.py \
+            tests/test_api_graph_adapter.py \
+            tests/test_native_hitl_resume.py
