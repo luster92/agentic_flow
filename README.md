@@ -116,12 +116,7 @@ ollama pull qwen2.5-coder:32b
 ollama pull phi4-mini
 ```
 
-Colibri 같은 느린 로컬 심층 모델을 사용할 경우:
-
-```bash
-export DEEP_LOCAL_API_BASE=http://localhost:8000/v1
-export DEEP_LOCAL_API_KEY=local-secret
-```
+`deep-local`은 기본적으로 `http://localhost:8000/v1`의 OpenAI-compatible endpoint와 `local-secret` 키를 사용합니다. 다른 주소나 키를 사용할 경우 `config.yaml`의 해당 deployment를 변경합니다.
 
 ---
 
