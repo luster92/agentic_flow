@@ -6,6 +6,8 @@ import logging
 import os
 from typing import Any
 
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 from openai import AsyncOpenAI
 
 from agents.router import Router
@@ -14,7 +16,6 @@ from core.checkpoint import CheckpointManager
 from core.event_bus import Event, EventBus, EventType
 from core.graph import create_orchestration_graph
 from core.orchestration_graph import OrchestrationDependencies
-from core.routing_schema import RoutingDecision
 from core.state import AgentState, CheckpointType
 from engine.hitl import HITLManager
 from engine.persona import PersonaManager
@@ -40,6 +41,7 @@ class GraphRuntime:
         persona: PersonaManager,
         events: EventBus,
         litellm_base_url: str | None = None,
+        graph_checkpointer=None,
     ) -> None:
         self.router = router
         self.worker = worker
@@ -53,7 +55,12 @@ class GraphRuntime:
         self.litellm_base_url = litellm_base_url or os.getenv(
             "LITELLM_BASE_URL", "http://localhost:4000"
         )
+        self.graph_checkpointer = graph_checkpointer or InMemorySaver()
         self.graph = self._build_graph()
+
+    @property
+    def graph_config(self) -> dict[str, Any]:
+        return {"configurable": {"thread_id": self.state.session_id}}
 
     async def cloud_call(
         self,
@@ -81,16 +88,6 @@ class GraphRuntime:
             logger.exception("Cloud call failed for %s", model_alias)
             return f"[ERROR] {model_alias} failed: {exc}"
 
-    async def approval_check(self, decision: RoutingDecision, request: str) -> bool:
-        if not decision.requires_human_approval:
-            return True
-        await self.hitl.suspend(
-            self.state,
-            decision.reason or "High-risk operation requires approval",
-            {"request": request[:500], "routing": decision.model_dump(mode="json")},
-        )
-        return False
-
     async def result_hook(self, result: dict[str, Any]) -> None:
         response = result.get("final_response", "")
         routing = result.get("routing", {})
@@ -103,6 +100,7 @@ class GraphRuntime:
                     "handler": alias,
                     "routing": routing,
                     "escalation_reason": result.get("escalation_reason", ""),
+                    "approval_action": result.get("approval_action", ""),
                     "graph_runtime": True,
                 },
             )
@@ -123,6 +121,7 @@ class GraphRuntime:
                     "response": response[:500],
                     "model_alias": alias,
                     "routing": routing,
+                    "approval_action": result.get("approval_action", ""),
                 },
             )
         )
@@ -136,17 +135,68 @@ class GraphRuntime:
                 context_provider=self.history.get_context,
                 cache_get=self.cache.get,
                 cache_put=self.cache.put,
-                approval_check=self.approval_check,
                 result_hook=self.result_hook,
-            )
+            ),
+            checkpointer=self.graph_checkpointer,
         )
+
+    @staticmethod
+    def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
+        interrupts = result.get("__interrupt__") or ()
+        if interrupts:
+            first = interrupts[0]
+            value = getattr(first, "value", first)
+            return {
+                **{k: v for k, v in result.items() if k != "__interrupt__"},
+                "status": "pending_approval",
+                "approved": None,
+                "interrupt": value,
+            }
+        return {**result, "status": "completed"}
 
     def reset(self) -> None:
         self.history.clear()
         self.state = AgentState()
+        self.graph_checkpointer = InMemorySaver()
         self.graph = self._build_graph()
 
     async def invoke(self, request: str) -> dict[str, Any]:
         self.history.add_message("user", request)
         self.state.increment_turn()
-        return await self.graph.ainvoke({"request": request})
+        result = await self.graph.ainvoke(
+            {"request": request},
+            config=self.graph_config,
+        )
+        return self._normalize_result(result)
+
+    async def resume(
+        self,
+        action: str,
+        modified_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_action = action.strip().lower()
+        if normalized_action not in {"approve", "reject", "modify"}:
+            raise ValueError("action must be one of: approve, reject, modify")
+        result = await self.graph.ainvoke(
+            Command(
+                resume={
+                    "action": normalized_action,
+                    "modified_data": modified_data or {},
+                }
+            ),
+            config=self.graph_config,
+        )
+        return self._normalize_result(result)
+
+    async def graph_state(self) -> dict[str, Any]:
+        snapshot = await self.graph.aget_state(self.graph_config)
+        interrupts: list[Any] = []
+        for task in snapshot.tasks or ():
+            for item in getattr(task, "interrupts", ()):
+                interrupts.append(getattr(item, "value", item))
+        return {
+            "values": dict(snapshot.values or {}),
+            "next": list(snapshot.next or ()),
+            "pending_interrupts": interrupts,
+            "status": "pending_approval" if interrupts else "idle",
+        }
