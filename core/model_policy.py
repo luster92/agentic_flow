@@ -9,6 +9,8 @@ from core.routing_schema import ExecutionTier, RoutingDecision, TaskType
 
 @dataclass(frozen=True)
 class ModelSelection:
+    """Provider-independent execution choice returned to the runtime."""
+
     alias: str
     fallback_aliases: tuple[str, ...] = ()
     timeout_seconds: int = 120
