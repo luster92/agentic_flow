@@ -157,6 +157,7 @@ clawflow/
 3. Semantic cache, HITL gate, local execution, quality escalation, persistence 상태 전이
 4. Graph-native CLI entrypoint
 5. LiteLLM alias 및 fallback 설정
+6. Model alias 전달 및 result hook 회귀 테스트
 
 남은 핵심 작업:
 
