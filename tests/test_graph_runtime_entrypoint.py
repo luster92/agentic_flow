@@ -38,3 +38,28 @@ async def test_policy_alias_is_passed_to_cloud_adapter():
     assert result["final_response"] == "ok"
     assert result["model_alias"] == "cloud-reasoning"
     assert aliases == ["cloud-reasoning"]
+
+
+@pytest.mark.asyncio
+async def test_result_hook_receives_selected_alias():
+    captured = []
+
+    async def cloud_call(task, context, model_alias):
+        return "done"
+
+    async def result_hook(result):
+        captured.append(result)
+
+    graph = OrchestrationGraph(
+        OrchestrationDependencies(
+            router=Router(),
+            worker=Worker(),
+            cloud_call=cloud_call,
+            result_hook=result_hook,
+        )
+    ).compile()
+
+    await graph.ainvoke({"request": "analyze"})
+
+    assert captured[0]["model_alias"] == "cloud-reasoning"
+    assert captured[0]["final_response"] == "done"
