@@ -74,12 +74,11 @@ model_list:
       api_key: "os.environ/GEMINI_API_KEY"
 
   # Optional OpenAI-compatible local endpoint, e.g. Colibri GLM-5.2.
-  # Set DEEP_LOCAL_API_BASE and DEEP_LOCAL_API_KEY before using this tier.
   - model_name: deep-local
     litellm_params:
       model: openai/glm-5.2-colibri
-      api_base: "os.environ/DEEP_LOCAL_API_BASE"
-      api_key: "os.environ/DEEP_LOCAL_API_KEY"
+      api_base: "http://localhost:8000/v1"
+      api_key: "local-secret"
       timeout: 1800
 
 router_settings:
