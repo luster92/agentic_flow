@@ -59,7 +59,10 @@ class GraphCLIController:
                     return results
                 response = result.get("final_response") or result.get("error") or ""
                 task.result = response
-                task.status = "failed" if response.startswith("[ERROR]") else "completed"
+                if response.startswith("[ERROR]") or result.get("error"):
+                    task.status = "failed"
+                    raise RuntimeError(f"Sub-task {task.id} failed: {response}")
+                task.status = "completed"
                 self._remember(result)
         return results
 
@@ -107,11 +110,15 @@ class GraphCLIController:
                 checkpoints = self.runtime.checkpoint.list_checkpoints(self.runtime.state.session_id)
                 text = "\n".join(f"step={cp['step']} label={cp['label']}" for cp in checkpoints)
                 return CommandResult(True, text or "No checkpoints")
-            restored = self.runtime.checkpoint.rollback(self.runtime.state.session_id, int(args[0]))
+            try:
+                step = int(args[0])
+            except ValueError:
+                return CommandResult(True, "Usage: /rollback <step>")
+            restored = self.runtime.checkpoint.rollback(self.runtime.state.session_id, step)
             if not restored:
                 return CommandResult(True, "Checkpoint not found")
             self.runtime.state = restored
-            return CommandResult(True, f"Rolled back to step={args[0]}")
+            return CommandResult(True, f"Rolled back to step={step}")
         if command in {"/approve", "/reject"}:
             result = await self.runtime.resume(command[1:])
             self._remember(result)
@@ -139,6 +146,7 @@ class GraphCLIController:
         self.runtime.history = history
         self.runtime.state = AgentState()
         self.runtime.graph = self.runtime._build_graph()
+        self.last_response = ""
 
     def _remember(self, result: dict[str, Any]) -> None:
         response = result.get("final_response")
