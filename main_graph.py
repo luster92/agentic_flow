@@ -11,12 +11,17 @@ from dotenv import load_dotenv
 from agents.router import Router
 from agents.worker import Worker
 from core.checkpoint import CheckpointManager
+from core.cli_controller import GraphCLIController
 from core.config_loader import ConfigLoader
 from core.event_bus import Event, EventBus, EventType
+from core.planner import TaskPlanner
 from core.runtime import GraphRuntime
 from core.state import AgentState
+from engine.adversarial import DebateLoop
 from engine.hitl import HITLManager
 from engine.persona import PersonaManager
+from engine.sandbox import SandboxManager
+from engine.tmux_integration import TmuxIntegration
 from utils.history_manager import HistoryManager
 from utils.key_manager import ensure_api_keys
 from utils.semantic_cache import SemanticCache
@@ -63,7 +68,18 @@ async def main() -> None:
         events=events,
         litellm_base_url=LITELLM_BASE_URL,
     )
+    controller = GraphCLIController(
+        runtime=runtime,
+        history_dir=HISTORY_DIR,
+        context_window=CONTEXT_WINDOW,
+        planner=TaskPlanner(base_url=LITELLM_BASE_URL),
+        debate=DebateLoop(persona_manager=persona, base_url=LITELLM_BASE_URL),
+    )
+    sandbox = SandboxManager()
+    tmux_session = f"test-{state.session_id}"
 
+    await sandbox.provision_container(state.session_id)
+    await TmuxIntegration.create_session(tmux_session)
     await events.publish(
         Event(
             type=EventType.SESSION_START,
@@ -73,39 +89,58 @@ async def main() -> None:
     )
 
     print("Clawflow Graph Runtime")
-    print("Commands: /exit, /clear, /status")
+    print(GraphCLIController.help_text())
+    print("Additional: !<command> runs in sandbox, /test <command> runs in tmux")
+
     try:
         while True:
             request = (await asyncio.to_thread(input, "\nYou > ")).strip()
             if not request:
                 continue
-            if request in {"/exit", "/quit"}:
-                break
-            if request == "/clear":
-                runtime.reset()
-                print("Session cleared.")
-                continue
-            if request == "/status":
-                print(
-                    f"session={runtime.state.session_id[:8]} "
-                    f"turn={runtime.state.turn_number} step={runtime.state.step}"
-                )
+
+            if request.startswith("!"):
+                output = await sandbox.execute_in_sandbox(runtime.state.session_id, request[1:])
+                print(f"\nSandbox >\n{output}")
                 continue
 
-            result = await runtime.invoke(request)
-            response = result.get("final_response") or result.get("error") or "[ERROR] No response"
-            print(f"\nAssistant > {response}")
-            if result.get("approved") is False:
-                print("Request stopped by the approval gate. Use the API or legacy CLI to resume HITL.")
+            if request.startswith("/test "):
+                command = request[6:].strip()
+                await TmuxIntegration.run_test(tmux_session, command)
+                await asyncio.sleep(1)
+                print(f"\nTest >\n{await TmuxIntegration.get_test_output(tmux_session)}")
+                continue
+
+            command_result = await controller.handle(request)
+            if command_result.handled:
+                if command_result.output:
+                    print(command_result.output)
+                if command_result.should_exit:
+                    break
+                continue
+
+            results = await controller.execute_request(request)
+            for result in results:
+                response = result.get("final_response") or result.get("error")
+                if response:
+                    print(f"\nAssistant > {response}")
+                if result.get("status") == "pending_approval":
+                    interrupt = result.get("interrupt") or {}
+                    print(f"Approval required: {interrupt.get('reason', 'review required')}")
+                    print("Use /approve, /reject, or /modify <replacement request>.")
+                    break
     finally:
-        await events.publish(
-            Event(
-                type=EventType.SESSION_END,
-                source="graph-runtime",
-                payload={"session_id": runtime.state.session_id},
+        try:
+            await sandbox.teardown_container(runtime.state.session_id)
+            await TmuxIntegration.kill_session(tmux_session)
+        finally:
+            await events.publish(
+                Event(
+                    type=EventType.SESSION_END,
+                    source="graph-runtime",
+                    payload={"session_id": runtime.state.session_id},
+                )
             )
-        )
-        await events.stop()
+            await events.stop()
 
 
 if __name__ == "__main__":
