@@ -81,7 +81,6 @@ class OrchestrationGraph:
         if not decision.requires_human_approval:
             return {"approved": True, "approval_action": "not-required"}
 
-        # Compatibility path for deterministic unit tests and embedded callers.
         if self.deps.approval_check is not None:
             approved = await self.deps.approval_check(decision, state["request"])
             return {
@@ -122,6 +121,9 @@ class OrchestrationGraph:
                 update["escalation_reason"] = "validation-fail"
             else:
                 update["escalation_reason"] = "worker-escalation"
+
+            decision = RoutingDecision.model_validate(state["routing"])
+            update["model_alias"] = self.deps.policy.select_elevation(decision).alias
         else:
             update["final_response"] = result.get("response", "")
         return update
