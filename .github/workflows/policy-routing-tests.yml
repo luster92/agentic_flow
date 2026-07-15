@@ -49,7 +49,7 @@ jobs:
 
       - name: Run routing, API, HITL, and CLI regression tests
         run: |
-          pytest -x -vv \
+          python -m pytest -x -vv \
             tests/test_routing_policy.py \
             tests/test_orchestration_graph.py \
             tests/test_graph_factory.py \
