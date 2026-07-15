@@ -40,7 +40,7 @@ jobs:
 
       - name: Run routing and graph regression tests
         run: |
-          pytest -q \
+          python -m pytest -q \
             tests/test_routing_policy.py \
             tests/test_orchestration_graph.py \
             tests/test_graph_factory.py \
