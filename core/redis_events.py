@@ -6,9 +6,9 @@ import redis.asyncio as redis
 logger = logging.getLogger(__name__)
 
 class HaltManager:
-    \"\"\"
+    """
     Redis Pub/Sub을 활용한 실시간 워크플로우 중단(Halt) 신호 관리자
-    \"\"\"
+    """
     def __init__(self, redis_url: str = "redis://localhost:6379/0"):
         self.redis_url = redis_url
         self.redis_client = None
