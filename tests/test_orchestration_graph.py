@@ -75,7 +75,7 @@ async def test_local_success_finishes_without_cloud():
 
 
 @pytest.mark.asyncio
-async def test_worker_quality_failure_escalates_to_cloud():
+async def test_worker_quality_failure_elevates_to_nvidia_glm52():
     router = FakeRouter(RoutingDecision(
         task_type=TaskType.CODING,
         execution_tier=ExecutionTier.LOCAL_QUALITY,
@@ -101,7 +101,38 @@ async def test_worker_quality_failure_escalates_to_cloud():
     result = await graph.ainvoke({"request": "write code"})
     assert result["final_response"] == "recovered"
     assert result["escalation_reason"] == "validation-fail"
+    assert result["model_alias"] == "nvidia-glm52"
+    assert cloud_inputs[0][1] == "nvidia-glm52"
     assert "broken attempt" in cloud_inputs[0][0]
+
+
+@pytest.mark.asyncio
+async def test_local_only_quality_failure_never_calls_external_elevation():
+    router = FakeRouter(RoutingDecision(
+        task_type=TaskType.CODING,
+        execution_tier=ExecutionTier.LOCAL_QUALITY,
+        local_only=True,
+    ))
+    worker = FakeWorker({
+        "response": "broken attempt",
+        "escalated": True,
+        "validation_passed": False,
+    })
+    cloud_calls = []
+
+    async def cloud_call(task, context, model_alias):
+        cloud_calls.append(model_alias)
+        return "unexpected"
+
+    graph = OrchestrationGraph(OrchestrationDependencies(
+        router=router,
+        worker=worker,
+        cloud_call=cloud_call,
+    )).compile()
+
+    result = await graph.ainvoke({"request": "private code"})
+    assert result["model_alias"] == "local-quality"
+    assert cloud_calls == ["local-quality"]
 
 
 @pytest.mark.asyncio

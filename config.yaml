@@ -48,6 +48,15 @@ model_list:
       model: ollama/qwen2.5-coder:32b
       api_base: "http://localhost:11434"
 
+  # NVIDIA Build free endpoint used for quality elevation after local failure.
+  - model_name: nvidia-glm52
+    litellm_params:
+      model: openai/z-ai/glm-5.2
+      api_base: "https://integrate.api.nvidia.com/v1"
+      api_key: "os.environ/NVIDIA_API_KEY"
+      timeout: 600
+      max_tokens: 16384
+
   - model_name: cloud-general
     litellm_params:
       model: gemini/gemini-3-pro
@@ -86,6 +95,10 @@ router_settings:
   num_retries: 2
   timeout: 300
   fallbacks:
+    - nvidia-glm52:
+        - cloud-specialist
+        - cloud-reasoning
+        - local-quality
     - cloud-general:
         - cloud-specialist
         - local-quality

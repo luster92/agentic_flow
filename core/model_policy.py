@@ -26,9 +26,15 @@ class ModelPolicy:
         ExecutionTier.CLOUD_SPECIALIST: "cloud-specialist",
         ExecutionTier.DEEP_LOCAL: "deep-local",
     }
+    DEFAULT_ELEVATION_ALIAS = "nvidia-glm52"
 
-    def __init__(self, aliases: dict[ExecutionTier, str] | None = None):
+    def __init__(
+        self,
+        aliases: dict[ExecutionTier, str] | None = None,
+        elevation_alias: str | None = None,
+    ):
         self.aliases = {**self.DEFAULT_ALIASES, **(aliases or {})}
+        self.elevation_alias = elevation_alias or self.DEFAULT_ELEVATION_ALIAS
 
     def select(self, decision: RoutingDecision) -> ModelSelection:
         if decision.local_only and decision.execution_tier in {
@@ -45,7 +51,7 @@ class ModelPolicy:
             fallbacks = ("local-quality",)
             timeout = 45
         elif decision.execution_tier == ExecutionTier.LOCAL_QUALITY:
-            fallbacks = () if decision.local_only else ("cloud-general",)
+            fallbacks = () if decision.local_only else (self.elevation_alias, "cloud-general")
             timeout = 180
         elif decision.execution_tier == ExecutionTier.CLOUD_GENERAL:
             fallbacks = ("cloud-specialist", "local-quality")
@@ -68,4 +74,15 @@ class ModelPolicy:
             alias=alias,
             fallback_aliases=fallbacks,
             timeout_seconds=timeout,
+        )
+
+    def select_elevation(self, decision: RoutingDecision) -> ModelSelection:
+        """Select the explicit quality-elevation target after local execution failure."""
+        if decision.local_only:
+            return ModelSelection(alias="local-quality", fallback_aliases=(), timeout_seconds=180)
+
+        return ModelSelection(
+            alias=self.elevation_alias,
+            fallback_aliases=("cloud-specialist", "cloud-reasoning"),
+            timeout_seconds=600,
         )
