@@ -127,7 +127,8 @@ class GraphSessionRegistry:
 
     @staticmethod
     def _normalize_thread_id(thread_id: str) -> str:
-        normalized = _SAFE_SESSION.sub("-", thread_id.strip())[:100]
-        if not normalized:
+        raw_thread_id = thread_id.strip()
+        if not _SAFE_SESSION.sub("", raw_thread_id):
             raise ValueError("thread_id must contain at least one valid character")
+        normalized = _SAFE_SESSION.sub("-", raw_thread_id)[:100]
         return normalized
