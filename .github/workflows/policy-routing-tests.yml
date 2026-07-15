@@ -1,0 +1,47 @@
+name: Policy Routing Tests
+
+on:
+  pull_request:
+    paths:
+      - "agents/router.py"
+      - "core/routing_schema.py"
+      - "core/model_policy.py"
+      - "core/orchestration_graph.py"
+      - "core/graph.py"
+      - "main_graph.py"
+      - "tests/test_routing_policy.py"
+      - "tests/test_orchestration_graph.py"
+      - "tests/test_graph_factory.py"
+      - "tests/test_graph_runtime_entrypoint.py"
+      - ".github/workflows/policy-routing-tests.yml"
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run routing and graph regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_routing_policy.py \
+            tests/test_orchestration_graph.py \
+            tests/test_graph_factory.py \
+            tests/test_graph_runtime_entrypoint.py

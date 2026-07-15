@@ -1,162 +1,454 @@
-# Clawflow: Enterprise Hybrid AI Orchestration (V5.3)
+# Clawflow: Hybrid AI Orchestration Framework (V5.4-dev)
 
-**Clawflow**는 Mac Mini (Apple Silicon M4) 환경에 최적화된 하이브리드 AI 오케스트레이션 시스템입니다. 
-V5.3 업데이트를 통해 **Intelligent API Key Discovery, Semantic Memory Compression, LangGraph 상태 관리, Human-in-the-Loop(HITL)** 기능을 완벽히 통합하여 엔터프라이즈 레벨의 프로덕션 안정성을 달성했습니다.
+**Clawflow**는 Apple Silicon 로컬 모델과 외부 LLM API를 하나의 정책 기반 실행 그래프로 연결하는 하이브리드 AI 오케스트레이션 프레임워크입니다.
 
----
+현재 개발 브랜치는 기존 `LOCAL | CLOUD` 이진 라우팅을 구조화된 multi-tier 정책으로 확장하고, CLI/API/Web이 공유할 수 있는 dependency-injected LangGraph 실행 코어를 도입합니다.
 
-## 🚀 Ocherstration Core (V4)
-
-*   **Hybrid Architecture**: 간단한 작업은 로컬(Ollama)에서, 복잡한 추론은 클라우드(Gemini/Claude)에서 처리하여 비용과 속도를 최적화합니다.
-*   **Intelligent Routing**: `DeepSeek-R1` 기반의 Router가 사용자 입력의 난이도를 판단하여 최적의 모델(Worker, Critic, Cloud PM)로 경로를 지정합니다.
-*   **Semantic Cache**: ChromaDB 벡터 유사도(≥0.95)로 FAQ/정적 응답을 즉시 반환하여 LLM 호출 비용을 제로화합니다.
-*   **Generative UI (Next.js)**: 칙칙한 콘솔 로그를 버리고, `TailwindCSS`와 `shadcn/ui` 기반의 React 프론트엔드를 도입했습니다.
-*   **Human-in-the-Loop (HITL)**: 인터럽트 기반 제어 메커니즘으로 결제/보안 등 민감한 작업 전 인간 승인을 요구하고, 파라미터를 수정한 뒤 재개할 수 있습니다.
+> 현재 상태는 production-ready가 아니라 **production-oriented experimental runtime**입니다. 기존 `main.py`는 호환성을 위해 유지하며, 신규 개발은 `main_graph.py`와 `core/orchestration_graph.py`를 기준으로 진행합니다.
 
 ---
 
-## 🌟 The V5 Paradigm: Autonomy & Memory
+## 1. Agent handoff: 먼저 읽을 내용
 
-### 🧠 Task & Context Mastery (V5.0)
-*   **Task Decomposition & DAG**: 고도화된 `TaskPlanner`를 통해 복잡한 프롬프트를 방향성 비순환 그래프(DAG) 형태의 하위 작업으로 자동 분해하여 순차 실행합니다.
-*   **Context Lifecycle & Handoff**: `ContextMonitor`가 컨텍스트 열화(Context Rot)를 감지하면 `HANDOFF.md`를 자동 생성하고 새로운 세션을 스폰하여 안정적인 장기 기억을 유지합니다.
-*   **Autonomous Verification Sandbox**: 위험한 명령어는 격리된 `Safeclaw` (Docker 샌드박스)에서 실행되며, 백그라운드 `tmux` 세션을 활용해 자율 Write-Test 루프를 수행합니다.
+다른 개발자나 AI agent가 작업을 이어받을 때는 다음 순서로 확인합니다.
 
-### 🏰 Production Hardening & Core Unification (V5.1)
-*   **Real PostgreSQL Authentication**: `api/server.py`에 실제 비동기 DB 쿼리(`asyncpg`)를 활용한 JWT 기반 RBAC 로직을 도입했습니다.
-*   **Unified AgentState**: LangGraph의 `TypedDict`와 Pydantic 모델을 결합하여 상태 파편화를 완벽히 제거했습니다.
-*   **Zero-Day Dependency Pinning**: `mcp`, `pydantic`, `langgraph` 등 코어 라이브러리를 최신 안정화 버전으로 100% 고정(`==`)하여 재현성을 보장합니다.
+1. `README.md` — 전체 구조, migration 경계, 다음 작업
+2. `core/routing_schema.py` — Router와 runtime 사이의 계약
+3. `core/model_policy.py` — routing decision을 LiteLLM alias로 변환하는 정책
+4. `core/orchestration_graph.py` — 실제 공통 실행 상태 머신
+5. `main_graph.py` — graph runtime에 기존 구성요소를 연결하는 CLI adapter
+6. `config.yaml` — LiteLLM alias와 provider deployment
+7. `tests/test_routing_policy.py`, `tests/test_orchestration_graph.py` — 기대 동작
 
-### 🧠 Deep Memory Optimization (V5.2)
-*   **Semantic Memory Compression (Context Pruning)**: 긴 대화로 인한 Context Rot 방지 및 토큰 오버플로우를 막기 위해, 임계치 초과 시 과거 기억을 백그라운드에서 **`Dense English Shorthand`** (기계-중심적 축약어, e.g. `req:auth|db:ok`)로 자동 압축하여 시계열 데이터(SQLite)에 병합합니다.
+### 작업 원칙
 
-### 🔑 Intelligent Onboarding UX (V5.3 - 🚀 LATEST)
-*   **Auto-Sensing OpenClaw Keys**: 번거로운 `.env` 파일 수동 편집 없이, 부팅 시 백그라운드에서 `~/.openclaw` 환경을 스캔하여 활성화된 클라우드 LLM 모델의 API 키를 자동으로 발견합니다.
-*   **Interactive Security Prompt**: OpenClaw 환경이 없더라도 CLI에서 안전하게 모델 선택 리스트를 띄워 마스킹 입력(`getpass`)을 받은 후 `.env` 생태계를 자율적으로 구성합니다.
+- 신규 오케스트레이션 로직을 `main.py`에 추가하지 않습니다.
+- provider의 실제 모델명을 agent/runtime 코드에 직접 넣지 않습니다.
+- Router는 모델명을 선택하지 않고 **작업 속성**을 반환합니다.
+- 모델 선택과 fallback은 `ModelPolicy`와 LiteLLM 설정에서 처리합니다.
+- 인프라 장애 fallback과 품질 실패 escalation을 구분합니다.
+- CLI, FastAPI, Web은 동일한 compiled graph를 호출해야 합니다.
+- 기존 legacy 기능을 제거하기 전 동일 기능의 graph adapter와 회귀 테스트를 먼저 만듭니다.
 
 ---
 
-## 🏗️ Architecture
+## 2. Architecture responsibility map
 
-```
-User Input
+| 계층 | 책임 | 주요 파일 |
+|---|---|---|
+| Transport | CLI, API, Web 입력·출력과 사용자 세션 | `main_graph.py`, `main.py`, `api/` |
+| Orchestration | 상태 전이, cache short-circuit, 승인, 실행, escalation, persist | `core/orchestration_graph.py` |
+| Routing contract | 작업 유형, 실행 티어, 위험도, privacy, tool/HITL 요구사항 | `core/routing_schema.py` |
+| Model policy | routing decision → 안정적인 LiteLLM alias | `core/model_policy.py` |
+| Model gateway | provider 연결, timeout, retry, deployment fallback | `config.yaml`, LiteLLM |
+| Agents | Router, Worker, Helper, Critic의 실제 추론 동작 | `agents/` |
+| Execution safety | HITL, Docker sandbox, tmux verification | `engine/` |
+| Persistence | history, cache, memory, checkpoint | `utils/`, `core/checkpoint.py` |
+
+### 명확한 경계
+
+**Clawflow가 담당하는 것**
+
+- task classification
+- sensitivity와 local-only 판정
+- quality escalation
+- tool/HITL 필요 여부
+- agent state와 실행 흐름
+- 결과 검증 및 persistence hook
+
+**LiteLLM이 담당하는 것**
+
+- provider timeout/retry
+- 동일 alias 내 deployment 선택
+- rate-limit 및 provider 장애 fallback
+- API key, budget, 비용 관측
+- OpenRouter, 직접 API, Ollama, MLX, OpenAI-compatible endpoint 통합
+
+---
+
+## 3. Runtime flow
+
+```text
+User request
     │
     ▼
-┌─────────────────┐
-│  Semantic Cache │──── HIT ──→ Cached Response (Latency ~0ms)
-└────────┬────────┘
-         │ MISS
-         ▼
-┌─────────────────┐
-│ Sticky Routing? │──── Same Agent ──→ Worker / Cloud PM (Router 스킵)
-└────────┬────────┘
-         │ New Context
-         ▼
-┌─────────────────┐
-│     Router      │──── LOCAL ──→ Worker ──→ Validator ──→ Critic
-│  (DeepSeek-R1)  │                                          │
-└────────┬────────┘                              REJECT ──→ Cloud PM
-         │ CLOUD                                               │
-         ▼                                                     ▼
-┌─────────────────┐                              ┌─────────────────────┐
-│    Cloud PM     │──────────────────────────────│  ⚔️ DebateLoop       │
-│ (Gemini/Claude) │                              │ Devil → Moderator   │
-└─────────────────┘                              │ → Worker (수정)     │
-                                                  └─────────┬───────────┘
-                                                            │ ESCALATE
-                                                            ▼
-                                                  ┌─────────────────────┐
-                                                  │ ⏸️ HITL Manager      │
-                                                  │ /approve · /reject  │
-                                                  └─────────────────────┘
+Semantic cache ── HIT ──→ Persist / return
+    │ MISS
+    ▼
+Structured Router
+    │
+    ▼
+Model Policy → LiteLLM alias
+    │
+    ├─ requires approval ──→ HITL gate ── reject ──→ Persist error
+    │                              │ approve
+    │                              ▼
+    ├─ local_fast / local_quality / deep_local
+    │          │
+    │          ▼
+    │      Local Worker
+    │          │
+    │          ├─ validation PASS ───────────────→ Persist
+    │          └─ validation/critic/escalate FAIL
+    │                                 │
+    └─ cloud_general / cloud_specialist
+                                      │
+                                      ▼
+                              Cloud execution
+                                      │
+                                      ▼
+                                   Persist
 ```
 
-## 🛠 Prerequisites
+이 흐름은 `core/orchestration_graph.py`에 구현되어 있습니다. Router, Worker, Cloud caller, Cache, approval checker, result hook은 `OrchestrationDependencies`를 통해 transport 계층에서 주입합니다.
 
-*   **macOS** (Apple Silicon M4 Native 최적화)
-*   **Python 3.11+**
-*   **Ollama**: 로컬 모델 실행용 ([Download](https://ollama.com))
-*   **Docker**: Safeclaw 샌드박스 실행 보장용
+### 현재 graph state
 
-## 📦 Quick Start
+`OrchestrationState`의 주요 필드:
 
-1.  **Repository Clone & Env Setup**
-    ```bash
-    git clone https://github.com/luster92/clawflow.git
-    cd clawflow
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-    ```
+```text
+request
+context
+routing
+model_alias
+cached_response
+worker_result
+final_response
+escalation_reason
+approved
+error
+```
 
-2.  **Run Orchestrator (Auto-Onboarding)**
-    `.env` 파일을 직접 수동 생성할 필요가 없습니다. 아래 명령어를 치면 **V5.3 Intelligent Key Discovery**가 자동으로 LLM API 키를 세팅해 줍니다.
-    ```bash
-    python main.py
-    ```
+state 필드를 추가할 때는 다음도 함께 수정합니다.
 
-3.  **Prepare Local Models (Ollama)**
-    ```bash
-    ollama pull deepseek-r1:8b        # Router
-    ollama pull qwen2.5-coder:32b     # Worker
-    ollama pull phi4-mini             # Helper
-    ```
+1. `OrchestrationState`
+2. 관련 node 반환값
+3. conditional edge
+4. `result_hook` adapter
+5. 회귀 테스트
 
-4.  **API / Web Server (Background)**
-    ```bash
-    uvicorn api.server:app --reload
-    ```
+---
 
-## 💻 CLI Commands (Interactive Terminal)
+## 4. Structured routing
 
-| 명령어 | 설명 |
-|---|---|
-| `/new <project>` | 새 프로젝트 세션 생성 |
-| `/load <project>` | 기존 프로젝트 세션 로드 (SQLite 체크포인트 복원) |
-| `/model <name>` | Cloud PM 모델 핫스왑 (gemini / claude / gpt4 / deepseek) |
-| `/persona <id>` | 동작 페르소나 전환 (worker / architect / devil / security_auditor) |
-| `/checkpoint` | 수동 마일스톤 체크포인트 강제 저장 |
-| `/debate` | 마지막 AI 응답에 대해 적대적 검증(Devil's Advocate) 강제 실행 |
-| `/approve` | HITL (Human-in-the-Loop) 일시정지 승인 |
-| `/stats` | 토큰 사용량 및 발생 누적 비용 리포트 출력 |
-| `/clear` | 현재 세션 메모리 및 컨텍스트 초기화 |
-| `/exit` | 안전 종료 (MCP, EventBus, Tmux 해제) |
+Router의 신규 기본 인터페이스는 다음입니다.
 
-## 📂 Project Structure
+```python
+async def decide(user_message: str) -> RoutingDecision
+```
+
+기존 코드 호환을 위해 아래 인터페이스도 유지합니다.
+
+```python
+async def route(user_message: str) -> dict
+```
+
+`route()`는 legacy `destination`, `reason`, `thinking` 형식을 반환하고 내부적으로 structured decision을 사용합니다.
+
+### RoutingDecision 주요 속성
+
+```text
+task_type
+execution_tier
+risk_level
+requires_tools
+requires_vision
+requires_human_approval
+local_only
+latency_tolerance_seconds
+reason
+confidence
+```
+
+### 현재 execution tiers
+
+```text
+local_fast
+local_quality
+cloud_general
+cloud_specialist
+deep_local
+```
+
+`deep_local`은 Colibri GLM-5.2처럼 매우 느리지만 외부 전송 없이 고난도 추론이 필요한 endpoint를 위한 명시적 티어입니다. 일반 local fallback으로 자동 선택하지 않습니다.
+
+---
+
+## 5. Model aliases
+
+애플리케이션은 실제 provider 모델명이 아니라 역할 alias만 사용합니다.
+
+```text
+local-router
+local-fast
+local-quality
+local-helper
+deep-local
+cloud-general
+cloud-coding
+cloud-reasoning
+cloud-long-context
+cloud-specialist
+```
+
+현재 기본 매핑은 `config.yaml`에서 확인합니다.
+
+- `local-fast`: 작은 로컬 모델
+- `local-quality`: 주력 로컬 Worker
+- `cloud-general`: 일반 클라우드 PM
+- `cloud-coding`: 코딩 특화 클라우드 모델
+- `cloud-reasoning`: 고난도 추론 모델
+- `cloud-long-context`: 긴 문맥 모델
+- `cloud-specialist`: 최종 specialist escalation
+- `deep-local`: OpenAI-compatible 느린 로컬 추론 endpoint
+
+새 provider를 추가할 때 agent 코드는 수정하지 않고 `config.yaml`의 동일 alias 아래 deployment를 추가합니다.
+
+---
+
+## 6. Entry points
+
+### Graph-native CLI — 신규 개발 기준
+
+```bash
+python main_graph.py
+```
+
+이 진입점은 다음 구성요소를 shared graph에 연결합니다.
+
+- `Router`
+- `Worker`
+- `HistoryManager`
+- `SemanticCache`
+- `CheckpointManager`
+- `HITLManager`
+- `EventBus`
+- LiteLLM cloud caller
+
+### Legacy full-feature CLI — migration source
+
+```bash
+python main.py
+```
+
+`main.py`에는 아직 다음 기능이 남아 있습니다.
+
+- project switch
+- planner와 task queue
+- persona command
+- debate command
+- HITL resume commands
+- sandbox/tmux lifecycle
+- context handoff
+- rollback/checkpoint CLI
+
+이 기능을 수정해야 할 때는 먼저 `main_graph.py` 또는 별도 adapter로 이식한 뒤 legacy 구현을 제거합니다.
+
+---
+
+## 7. Quick start
+
+```bash
+git clone https://github.com/luster92/clawflow.git
+cd clawflow
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+LiteLLM Proxy:
+
+```bash
+litellm --config config.yaml --port 4000
+```
+
+Graph-native CLI:
+
+```bash
+python main_graph.py
+```
+
+로컬 모델 예시:
+
+```bash
+ollama pull deepseek-r1:8b
+ollama pull qwen2.5-coder:32b
+ollama pull phi4-mini
+```
+
+`deep-local`은 기본적으로 `http://localhost:8000/v1`의 OpenAI-compatible endpoint와 `local-secret` 키를 사용합니다. 다른 주소나 키를 사용할 경우 `config.yaml`을 변경합니다.
+
+---
+
+## 8. Environment and prerequisites
+
+- macOS 또는 Linux
+- Python 3.11+
+- LiteLLM Proxy
+- Ollama 또는 다른 OpenAI-compatible 로컬 endpoint
+- Docker: 격리 실행 사용 시
+- PostgreSQL: LangGraph 영속 checkpointer 사용 시
+- Redis: 분산 event/cooldown/rate-limit 상태 사용 시
+
+주요 환경 변수 예시:
+
+```text
+LITELLM_BASE_URL=http://localhost:4000
+LITELLM_API_KEY=not-needed
+GEMINI_API_KEY=...
+ANTHROPIC_API_KEY=...
+OPENAI_API_KEY=...
+OPENROUTER_API_KEY=...
+COLI_API_KEY=local-secret
+```
+
+실제 사용 여부는 `config.yaml`과 adapter 구현을 기준으로 확인합니다.
+
+---
+
+## 9. Project structure
 
 ```text
 clawflow/
-├── api/                        # FastAPI 엔드포인트 계층 (v5.1 Postgres Auth)
-├── core/                       # 코어 인프라 계층
-│   ├── graph.py                # LangGraph StateGraph 파이프라인 (Unified State)
-│   ├── auth.py                 # JWT Middleware & RBAC 
-│   ├── observability.py        # Token Tracking & 비용 산출
-│   ├── redis_events.py         # Pub/Sub 기반 HaltManager
-│   ├── state.py                # Pydantic AgentState 
-│   ├── config_loader.py        # 계층적 YAML 설정
-│   └── engine_mlx.py           # MLX 추론 엔진
-├── frontend/                   # Next.js Generative UI
-├── engine/                     # 동작 제어 엔진 계층
-│   ├── persona.py              # PersonaManager (핫스왑)
-│   ├── adversarial.py          # DebateLoop (정-반-합 토론)
-│   ├── hitl.py                 # HITL 인터럽트 핸들러
-│   ├── sandbox.py              # Docker Native Safeclaw Sandbox
-│   └── tmux_integration.py     # 터미널용 백그라운드 세션 세팅
-├── agents/                     # 워커 및 라우터 모델 계층
-│   ├── router.py               # Rule-based + LLM 라우팅
-│   ├── worker.py               # ReAct 도구 사용 루프
-│   ├── critic.py               # JSON 코드 리뷰어
-│   └── helper.py               # 경량 작업 위임 처리 (Phi-4)
-├── utils/                      # 유틸리티 (V5.X 핫-피처 모음)
-│   ├── history_manager.py      # SQLite 대화기록 + **Semantic Memory Compression**
-│   ├── key_manager.py          # **Intelligent API Key Discovery** 로그
-│   ├── mcp_client.py           # MCP 프로토콜 어댑터
-│   └── semantic_cache.py       # 시맨틱 응답 캐시 엔진
-├── scripts/                    # 오토 튜닝, Dep 패키지 Fetch 관리 스크립트 등
-├── tests/                      # 파이테스트 100+ Suites (Memory Compression 등)
-├── main.py                     # CLI 메인 오케스트레이터
-└── requirements.txt            # Zero-Day Pinning Dependencies
+├── api/                         # FastAPI transport and authentication
+├── core/
+│   ├── orchestration_graph.py   # Shared dependency-injected LangGraph runtime
+│   ├── routing_schema.py        # Structured routing contract
+│   ├── model_policy.py          # Routing decision → stable model alias
+│   ├── graph.py                 # Graph factory and legacy checkpoint graph
+│   ├── state.py                 # Legacy/persistent session state
+│   └── observability.py         # Token and cost accounting
+├── agents/
+│   ├── router.py                # Rule-first + LLM structured router
+│   ├── worker.py                # Tool-using Worker and quality escalation
+│   ├── critic.py
+│   └── helper.py
+├── engine/                      # HITL, sandbox, persona, adversarial evaluation
+├── utils/                       # Cache, memory, MCP, history, key management
+├── frontend/                    # Next.js UI
+├── tests/
+├── main_graph.py                # Graph-native CLI entrypoint
+├── main.py                      # Legacy full-feature CLI during migration
+└── config.yaml                  # LiteLLM model aliases, fallback, MCP config
 ```
 
-## 📄 License
+---
+
+## 10. Testing
+
+주요 회귀 테스트:
+
+```bash
+pytest tests/test_routing_policy.py
+pytest tests/test_orchestration_graph.py
+pytest tests/test_graph_factory.py
+pytest tests/test_graph_runtime_entrypoint.py
+```
+
+전체 테스트:
+
+```bash
+pytest
+```
+
+필수 검증 시나리오:
+
+- cache hit 시 Router와 Worker가 호출되지 않음
+- local 성공 시 cloud가 호출되지 않음
+- Worker validation/Critic 실패 시 cloud로 escalation
+- local-only 요청이 cloud alias를 선택하지 않음
+- high-risk 요청은 approval 없이 실행되지 않음
+- cloud task type별 alias가 cloud caller까지 전달됨
+- persistence hook이 handler, model alias, routing metadata를 기록함
+
+---
+
+## 11. Current migration status
+
+### 완료
+
+1. Structured routing contract
+2. Provider-independent model policy
+3. Shared LangGraph orchestration core
+4. Semantic cache short-circuit
+5. HITL approval gate
+6. Local execution과 quality-based cloud escalation
+7. Result persistence hook
+8. Graph-native CLI entrypoint
+9. LiteLLM role aliases와 기본 fallback
+10. Routing/graph/entrypoint 회귀 테스트
+
+### 다음 작업 — 우선순위 순
+
+#### P0. FastAPI를 shared graph로 전환
+
+- `api/server.py`가 독자 실행 로직을 가지지 않게 변경
+- 앱 startup에서 graph를 한 번 compile
+- 요청마다 `graph.ainvoke()` 호출
+- user/session별 thread ID와 checkpointer 연결
+
+#### P0. HITL pause/resume를 LangGraph native 방식으로 연결
+
+- 현재 approval checker는 즉시 boolean adapter
+- 향후 interrupt와 persisted checkpoint를 사용
+- `/approve`, `/reject` 또는 API endpoint가 동일 graph thread를 재개해야 함
+
+#### P1. Legacy CLI 기능 이식
+
+- project/session switch
+- planner와 task queue
+- persona
+- debate
+- sandbox/tmux
+- context handoff
+- rollback/checkpoint
+
+#### P1. Persistence 책임 정리
+
+권장 책임:
+
+```text
+Postgres/LangGraph checkpoint = 실행 상태
+Conversation store            = 원문 대화
+Vector memory                 = 장기 의미 기억
+Semantic cache                = 재사용 가능한 최종 응답
+HANDOFF                        = 세션 이동용 압축 요약
+```
+
+#### P2. LiteLLM production policy
+
+- 동일 alias의 직접 API + OpenRouter backup
+- retry/cooldown
+- tenant virtual key
+- budget/rate limit
+- provider별 timeout
+- observability metadata 통일
+
+---
+
+## 12. Known limitations
+
+- 전체 `main.py` 기능이 아직 graph-native CLI로 이식되지 않았습니다.
+- shared graph에 PostgreSQL checkpointer가 기본 연결되어 있지 않습니다.
+- HITL resume는 아직 완전한 durable interrupt 방식이 아닙니다.
+- `deep-local` endpoint는 설치 여부에 따라 사용할 수 없을 수 있습니다.
+- LiteLLM alias는 설정돼 있지만 실제 provider model availability와 API key는 환경에서 검증해야 합니다.
+- repository 전체 테스트는 의존성이 설치된 로컬 또는 CI 환경에서 수행해야 합니다.
+
+---
+
+## 13. Do not do this
+
+- `main.py`와 `main_graph.py`에 동일 orchestration 로직을 복제하지 않습니다.
+- Router prompt에서 특정 provider 모델명을 직접 반환하지 않습니다.
+- `LOCAL/CLOUD`만으로 신규 기능을 설계하지 않습니다.
+- validation 실패와 provider timeout을 같은 fallback으로 처리하지 않습니다.
+- 고위험 tool action을 approval 없이 자동 실행하지 않습니다.
+- session별 설정을 global mutable variable로 저장하지 않습니다.
+- README의 완료 상태를 실제 구현보다 과장하지 않습니다.
+
+---
+
+## License
+
 MIT License

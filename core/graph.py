@@ -1,89 +1,91 @@
-import asyncio
-import logging
-from typing import Annotated, Any, Dict, List, Literal, Optional
-from typing_extensions import TypedDict
-from pydantic import BaseModel, Field
+"""LangGraph entry points for Clawflow.
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+`create_orchestration_graph` is the shared runtime for new CLI/API code.
+`get_compiled_graph` preserves the legacy Postgres-checkpoint example until all
+transports have migrated to dependency injection.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Annotated, Any, Literal
+from typing_extensions import TypedDict
+
+from langchain_core.messages import BaseMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.runnables import RunnableConfig
+from psycopg_pool import AsyncConnectionPool
 
 from .redis_events import halt_manager
 from .state import AgentState as CoreAgentState
+from .orchestration_graph import OrchestrationDependencies, OrchestrationGraph
 
 logger = logging.getLogger(__name__)
 
-# ── 1. State Definition ──
-class AgentState(TypedDict):
-    """LangGraph 기반 에이전트 상태 (Unified with core.state)"""
-    messages: Annotated[list[BaseMessage], "add_messages"]
-    next: str  # supervisor가 라우팅할 다음 에이전트
-    halt_requested: bool  # Halt mechanism flag
-    internal_data: dict[str, Any]  # for scratchpad / HITL modifications
-    core_state: CoreAgentState # Pydantic v2 unified state reference
 
-# ── 2. Agents ──
+def create_orchestration_graph(
+    dependencies: OrchestrationDependencies,
+    *,
+    checkpointer=None,
+):
+    """Compile the production-oriented shared orchestration graph.
+
+    Transport layers should construct adapters for Router, Worker, cloud model,
+    cache, approval, and persistence, then invoke this factory.
+    """
+    return OrchestrationGraph(dependencies).compile(checkpointer=checkpointer)
+
+
+# ---------------------------------------------------------------------------
+# Legacy graph retained for compatibility while CLI/API migration is ongoing.
+# ---------------------------------------------------------------------------
+class AgentState(TypedDict):
+    messages: Annotated[list[BaseMessage], "add_messages"]
+    next: str
+    halt_requested: bool
+    internal_data: dict[str, Any]
+    core_state: CoreAgentState
+
+
 async def supervisor_node(state: AgentState):
-    """
-    작업의 성격을 분석하여 적절한 에이전트(Worker, Critic 등)에게 라우팅합니다.
-    """
-    next_agent = "worker"
-        
-    if state.get("halt_requested"):
-        next_agent = "END"
-        
+    next_agent = "END" if state.get("halt_requested") else "worker"
     return {"next": next_agent}
 
+
 async def worker_node(state: AgentState):
-    """
-    실제 작업을 수행하는 핵심 에이전트 노드.
-    (향후 agents/worker.py 연동)
-    """
     return {"messages": [AIMessage(content="Worker 에이전트: 요청하신 작업을 처리 중입니다.")]}
 
-# ── 3. Edge Logic ──
-def router_edge(state: AgentState, config: RunnableConfig) -> Literal["worker", "__end__"]:
-    """Supervisor의 결정에 따라 라우팅"""
-    thread_id = config.get("configurable", {}).get("thread_id", "")
-    
-    if thread_id and halt_manager.is_halt_requested(thread_id):
-        logger.warning(f"🛑 라우팅 엣지에서 Halt 요청 감지됨. 세션 {thread_id} 종료.")
-        return "__end__"
-        
-    if state.get("halt_requested"):
-        return "__end__"
-        
-    next_node = state.get("next", "worker")
-    if next_node == "END":
-        return "__end__"
-    return next_node
 
-# ── 4. Graph Construction ──
-from psycopg_pool import AsyncConnectionPool
+def router_edge(state: AgentState, config: RunnableConfig) -> Literal["worker", "__end__"]:
+    thread_id = config.get("configurable", {}).get("thread_id", "")
+    if thread_id and halt_manager.is_halt_requested(thread_id):
+        logger.warning("Halt requested for session %s", thread_id)
+        return "__end__"
+    if state.get("halt_requested") or state.get("next") == "END":
+        return "__end__"
+    return "worker"
+
 
 def build_graph():
+    """Build the deprecated placeholder graph.
+
+    New code must use `create_orchestration_graph` instead.
+    """
     builder = StateGraph(AgentState)
-    
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("worker", worker_node)
-    
     builder.add_edge(START, "supervisor")
     builder.add_conditional_edges("supervisor", router_edge)
-    
-    # 각 노드에서 작업 완료 후 종료되거나 supervisor로 복귀할 수 있음
     builder.add_edge("worker", END)
-    
     return builder
 
-# ── 5. Runtime Interface ──
+
 async def get_compiled_graph(pool: AsyncConnectionPool):
+    """Compile the legacy graph with a Postgres checkpointer."""
     checkpointer = AsyncPostgresSaver(pool)
     await checkpointer.setup()
-    graph = build_graph()
-    # HITL (Pause) 설정: worker 직전에 일시 정지 (예시)
-    return graph.compile(
+    return build_graph().compile(
         checkpointer=checkpointer,
-        interrupt_before=["worker"]
+        interrupt_before=["worker"],
     )
