@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any, Dict
 
@@ -15,7 +14,6 @@ from slowapi.util import get_remote_address
 
 from api.graph_adapter import GraphSessionRegistry
 from core.auth import create_access_token, get_password_hash, require_role, verify_password
-from core.graph import get_compiled_graph
 from core.redis_events import halt_manager
 
 logger = logging.getLogger("api")
@@ -74,7 +72,7 @@ async def startup_event():
                 logger.info("Seeded default users: admin, operator")
 
     await halt_manager.connect()
-    await graph_sessions.start()
+    await graph_sessions.start(pg_pool)
 
 
 @app.on_event("shutdown")
@@ -145,6 +143,22 @@ class InvokeRequest(BaseModel):
     message: str = Field(min_length=1, max_length=100_000)
 
 
+def _result_payload(thread_id: str, result: dict[str, Any], username: str) -> dict[str, Any]:
+    return {
+        "thread_id": thread_id,
+        "status": result.get("status", "completed"),
+        "response": result.get("final_response"),
+        "error": result.get("error"),
+        "approved": result.get("approved"),
+        "approval_action": result.get("approval_action"),
+        "interrupt": result.get("interrupt"),
+        "routing": result.get("routing", {}),
+        "model_alias": result.get("model_alias"),
+        "escalation_reason": result.get("escalation_reason"),
+        "requested_by": username,
+    }
+
+
 @app.post("/api/v1/conversations/invoke")
 @limiter.limit("30/minute")
 async def invoke_conversation(
@@ -152,7 +166,7 @@ async def invoke_conversation(
     req_body: InvokeRequest,
     current_user: dict = Depends(require_role("operator")),
 ):
-    """Execute one request through the shared policy-based LangGraph runtime."""
+    """Execute or pause one request through the persisted shared graph."""
     try:
         result = await graph_sessions.invoke(req_body.thread_id, req_body.message)
     except ValueError as exc:
@@ -160,22 +174,12 @@ async def invoke_conversation(
     except Exception as exc:
         logger.exception("Graph invocation failed for thread %s", req_body.thread_id)
         raise HTTPException(status_code=500, detail="Graph invocation failed") from exc
-
-    return {
-        "thread_id": req_body.thread_id,
-        "response": result.get("final_response"),
-        "error": result.get("error"),
-        "approved": result.get("approved", True),
-        "routing": result.get("routing", {}),
-        "model_alias": result.get("model_alias"),
-        "escalation_reason": result.get("escalation_reason"),
-        "requested_by": current_user["username"],
-    }
+    return _result_payload(req_body.thread_id, result, current_user["username"])
 
 
 class ResumeRequest(BaseModel):
-    thread_id: str
-    action: str
+    thread_id: str = Field(min_length=1, max_length=100)
+    action: str = Field(pattern="^(approve|reject|modify)$")
     modified_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -186,20 +190,19 @@ async def resume_workflow(
     req_body: ResumeRequest,
     current_user: dict = Depends(require_role("operator")),
 ):
-    """Resume the legacy PostgreSQL-checkpointed graph during migration."""
-    if pg_pool is None:
-        raise HTTPException(status_code=503, detail="Database is not initialized")
+    """Resume the same persisted LangGraph thread after an approval interrupt."""
     try:
-        graph = await get_compiled_graph(pg_pool)
-        config = {"configurable": {"thread_id": req_body.thread_id}}
-        if req_body.modified_data:
-            await graph.aupdate_state(config, req_body.modified_data)
-        config["tags"] = ["langsmith:nostream", f"user:{current_user['username']}"]
-        asyncio.create_task(graph.ainvoke(None, config=config))
-        return {"status": "resumed", "thread_id": req_body.thread_id}
+        result = await graph_sessions.resume(
+            req_body.thread_id,
+            req_body.action,
+            req_body.modified_data,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Resume failed")
+        logger.exception("Resume failed for thread %s", req_body.thread_id)
         raise HTTPException(status_code=500, detail="Resume failed") from exc
+    return _result_payload(req_body.thread_id, result, current_user["username"])
 
 
 class HaltRequest(BaseModel):
@@ -227,7 +230,7 @@ async def get_current_state(
     thread_id: str = "default_session",
     current_user: dict = Depends(require_role("operator")),
 ):
-    """Return the real in-memory graph session state instead of a mock payload."""
+    """Return persisted graph values, next nodes, and pending interrupts."""
     try:
         state = await graph_sessions.state(thread_id)
     except ValueError as exc:

@@ -1,8 +1,4 @@
-"""Dependency-injected LangGraph execution core for Clawflow.
-
-The graph owns orchestration state transitions. CLI/API layers provide concrete
-router, worker, cloud, cache, HITL, persistence, and observability adapters.
-"""
+"""Dependency-injected LangGraph execution core for Clawflow."""
 
 from __future__ import annotations
 
@@ -10,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 from core.model_policy import ModelPolicy
 from core.routing_schema import RoutingDecision
@@ -41,6 +38,7 @@ class OrchestrationState(TypedDict, total=False):
     final_response: str
     escalation_reason: str
     approved: bool
+    approval_action: str
     error: str
 
 
@@ -58,7 +56,7 @@ class OrchestrationDependencies:
 
 
 class OrchestrationGraph:
-    """Builds a reusable graph shared by CLI, API, and web runtimes."""
+    """Reusable state machine shared by CLI, API, and web transports."""
 
     def __init__(self, deps: OrchestrationDependencies):
         self.deps = deps
@@ -81,23 +79,49 @@ class OrchestrationGraph:
     async def approval_gate(self, state: OrchestrationState) -> dict[str, Any]:
         decision = RoutingDecision.model_validate(state["routing"])
         if not decision.requires_human_approval:
-            return {"approved": True}
-        if not self.deps.approval_check:
-            return {"approved": False, "error": "Human approval is required"}
-        approved = await self.deps.approval_check(decision, state["request"])
-        return {"approved": approved, "error": "Human approval rejected" if not approved else ""}
+            return {"approved": True, "approval_action": "not-required"}
+
+        # Compatibility path for deterministic unit tests and embedded callers.
+        if self.deps.approval_check is not None:
+            approved = await self.deps.approval_check(decision, state["request"])
+            return {
+                "approved": approved,
+                "approval_action": "approve" if approved else "reject",
+                "error": "Human approval rejected" if not approved else "",
+            }
+
+        resume_payload = interrupt(
+            {
+                "type": "approval_required",
+                "request": state["request"],
+                "routing": state["routing"],
+                "reason": decision.reason or "High-risk operation requires approval",
+                "allowed_actions": ["approve", "reject", "modify"],
+            }
+        )
+        payload = resume_payload if isinstance(resume_payload, dict) else {"action": resume_payload}
+        action = str(payload.get("action", "reject")).lower()
+        approved = action in {"approve", "modify"}
+        update: dict[str, Any] = {
+            "approved": approved,
+            "approval_action": action,
+            "error": "Human approval rejected" if not approved else "",
+        }
+        modified = payload.get("modified_data") or {}
+        if approved and isinstance(modified, dict) and isinstance(modified.get("request"), str):
+            update["request"] = modified["request"]
+        return update
 
     async def local_execute(self, state: OrchestrationState) -> dict[str, Any]:
         result = await self.deps.worker.execute(state["request"], context=state.get("context"))
         update: dict[str, Any] = {"worker_result": result}
         if result.get("escalated"):
             if result.get("critic_passed") is False:
-                reason = "critic-reject"
+                update["escalation_reason"] = "critic-reject"
             elif result.get("validation_passed") is False:
-                reason = "validation-fail"
+                update["escalation_reason"] = "validation-fail"
             else:
-                reason = "worker-escalation"
-            update["escalation_reason"] = reason
+                update["escalation_reason"] = "worker-escalation"
         else:
             update["final_response"] = result.get("response", "")
         return update
@@ -150,7 +174,6 @@ class OrchestrationGraph:
         graph.add_node("local", self.local_execute)
         graph.add_node("cloud", self.cloud_execute)
         graph.add_node("persist", self.persist)
-
         graph.add_edge(START, "cache")
         graph.add_conditional_edges("cache", self.after_cache)
         graph.add_conditional_edges("classify", self.after_classify)
